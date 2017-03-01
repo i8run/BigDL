@@ -173,6 +173,7 @@
                         <goals>
                             <goal>single</goal>
                         </goals>
+                        <attach>true</attach>
                     </execution>
                     <execution>
                         <id>with-spark</id>
@@ -185,6 +186,7 @@
                         <goals>
                             <goal>single</goal>
                         </goals>
+                        <attach>false</attach>
                     </execution>
                 </executions>
             </plugin>
