@@ -58,7 +58,7 @@ object LoggerFilter {
     console.setLayout(new PatternLayout(pattern))
     console.setThreshold(level)
     console.activateOptions()
-    console.setTarget("System.out")
+    console.setTarget("System.err")
 
     console
   }
@@ -96,17 +96,13 @@ object LoggerFilter {
           .error(s"$logFile exists and is an directory. Can't redirect to it.")
       }
 
-      val defaultClasses = List("org", "akka", "breeze")
-
-      for (clz <- defaultClasses) {
-        classLogToAppender(clz, consoleAppender(Level.ERROR))
-        Logger.getLogger(clz).setAdditivity(false)
-      }
-
       Logger.getLogger("org.apache.spark.SparkContext").setLevel(Level.WARN)
 
-      for (clz <- optimClass :: defaultClasses) {
+      val defaultClasses = List("org", "akka", "breeze", optimClass)
+      for (clz <- defaultClasses) {
+        classLogToAppender(clz, consoleAppender(Level.ERROR))
         classLogToAppender(clz, fileAppender(logFile, Level.INFO))
+        Logger.getLogger(clz).setAdditivity(false)
       }
     }
   }
