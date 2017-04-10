@@ -79,8 +79,12 @@ object Engine {
     if (System.getProperty("spark.master").toLowerCase.startsWith("mesos")) {
       val sc = SparkContext.getOrCreate(new SparkConf()
         .setAppName("set mesos backend for Engine check"))
-      require(sc.appName != "set mesos backend for Engine check",
-        s"Have you created the SparkContext?")
+
+      // the spark context must be created before.
+      if (sc.appName == "set mesos backend for Engine check") {
+        sc.stop()
+        throw new IllegalStateException("Have you created the SparkContext?")
+      }
 
       if (MesosResources.checkAllExecutorStarted(sc)) {
         return

@@ -18,7 +18,7 @@ package org.apache.spark.scheduler.cluster.mesos
 
 import org.apache.spark.{SparkConf, SparkContext}
 
-object MesosResources {
+object MesosResources extends MesosBackend {
   /**
    * Get the totalCoreCount, which will be updated in RPC method (receiveAndReply),
    *
@@ -68,8 +68,7 @@ object MesosResources {
         }
 
         ret
-      case _ => throw new IllegalArgumentException(s"Did you set the right schduler backend?" +
-        s"We only support Mesos Coarse Scheduler Backend.")
+      case _ => true // ignore all others backend.
     }
   }
 }
