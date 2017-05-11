@@ -18,6 +18,7 @@ package com.intel.analytics.bigdl.nn
 
 import java.util
 
+import com.intel.analytics.bigdl.utils.Util
 import com.intel.analytics.bigdl.tensor.Tensor
 
 object NNPrimitive {
@@ -126,7 +127,7 @@ object NNPrimitive {
         while (y < outputHeight) {
           val iy = y * dH - padH + kh
           if (iy < 0 || iy >= inputHeight) {
-            util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
+            Util.fillArray(fInputData, dstOffset + y * outputWidth,
               dstOffset + (y + 1) * outputWidth, 0)
           } else {
             if (dW == 1) {
@@ -134,10 +135,10 @@ object NNPrimitive {
               val lpad = Math.max(0, padW - kw)
               val rpad = Math.max(0, padW - (kW - kw - 1))
               if (outputWidth - rpad - lpad <= 0) {
-                util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
+                Util.fillArray(fInputData, dstOffset + y * outputWidth,
                   dstOffset + (y + 1) * outputWidth, 0)
               } else {
-                if (lpad > 0) util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
+                if (lpad > 0) Util.fillArray(fInputData, dstOffset + y * outputWidth,
                   dstOffset + y * outputWidth + lpad, 0)
                 System.arraycopy(inputData, srcOffset + iy * inputWidth + ix + lpad, fInputData,
                   dstOffset + y * outputWidth + lpad, outputWidth - rpad - lpad)

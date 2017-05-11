@@ -52,4 +52,20 @@ object Util {
     swap(arr, l + pivot, r);
     partition(arr, l, r);
   }
+
+  def fillArray(array: Array[Float], value: Float, start: Int, end: Int): Unit = {
+    if ((end - start) > 0) {
+      array(0) = value
+    }
+
+    for (i <- start + 1 until end) {
+      val len = if ((end - i) < i) {
+        end - i
+      } else {
+        i
+      }
+
+      System.arraycopy(array, start, array, i, len)
+    }
+  }
 }
