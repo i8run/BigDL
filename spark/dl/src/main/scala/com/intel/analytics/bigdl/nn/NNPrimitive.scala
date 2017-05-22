@@ -260,7 +260,7 @@ object NNPrimitive {
     val padL = padW
     val padR = padW
 
-    if (padT == 0 && padB == 0 && padL == 0 && padR == 0 && dilationH == 0 && dilationW == 0) {
+    if (padT == 0 && padB == 0 && padL == 0 && padR == 0 && dilationH == 1 && dilationW == 1) {
       continuous(fInput, input, kW, kH, dW, dH, nInputPlane, inputWidth, inputHeight,
         outputWidth, outputHeight)
     } else if (padT == padB && padL == padR) {
