@@ -360,21 +360,11 @@ class SpatialShareConvolution[T: ClassTag](
     implicit ev: TensorNumeric[T]): Unit = {
 
     if (!_1x1) {
-      ev.getType() match {
-        case DoubleType =>
-          val before = System.nanoTime()
-          NNPrimitive.im2colDouble(fInput.asInstanceOf[Tensor[Double]],
-            input.asInstanceOf[Tensor[Double]], kW, kH, dW, dH, padW, padH, nInputPlane,
-            inputWidth, inputHeight, outputWidth, outputHeight)
-          im2colTime += System.nanoTime() - before
-        case FloatType =>
-          val before = System.nanoTime()
-          NNPrimitive.im2colFloat(fInput.asInstanceOf[Tensor[Float]],
-            input.asInstanceOf[Tensor[Float]], kW, kH, dW, dH, padW, padH, nInputPlane,
-            inputWidth, inputHeight, outputWidth, outputHeight)
-          im2colTime += System.nanoTime() - before
-        case _ => throw new UnsupportedOperationException(s"Only Float/Double supported")
-      }
+      val before = System.nanoTime()
+      NNPrimitive.im2col[T](fInput, input,
+        kW, kH, dW, dH, padW, padH, nInputPlane,
+        inputWidth, inputHeight, outputWidth, outputHeight)(ev)
+      im2colTime += System.nanoTime() - before
     }
   }
 }
