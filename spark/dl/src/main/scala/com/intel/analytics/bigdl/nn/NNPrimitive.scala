@@ -381,6 +381,72 @@ object NNPrimitive {
       }
     }
 
+    def systemcallV(
+      fInput: Tensor[Float], input: Tensor[Float],
+      kW: Int, kH: Int, dW: Int, dH: Int, padW: Int, padH: Int,
+      nInputPlane: Int, inputWidth: Int, inputHeight: Int,
+      outputWidth: Int, outputHeight: Int, fillValue: Float): Unit = {
+        val inputData = input.storage().array()
+        val fInputData = fInput.storage().array()
+
+        val dilationH = 1
+        val dilationW = 1
+
+        val padT = padH
+        val padB = padH
+        val padL = padW
+        val padR = padW
+        var k = 0
+        while (k < nInputPlane * kH * kW) {
+          val nip = k / (kH * kW)
+          val rest = k % (kH * kW)
+          val kh = rest / kW
+          val kw = rest % kW
+          val dstOffset = k * outputHeight * outputWidth + fInput.storageOffset() - 1
+          val srcOffset = nip * inputWidth * inputHeight + input.storageOffset() - 1
+          var y = 0
+          while (y < outputHeight) {
+            val iy = y * dH - padH + kh
+            if (iy < 0 || iy >= inputHeight) {
+              util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
+                dstOffset + (y + 1) * outputWidth, fillValue)
+            } else {
+              if (dW == 1) {
+                val ix = 0 - padW + kw
+                val lpad = Math.max(0, padW - kw)
+                val rpad = Math.max(0, padW - (kW - kw - 1))
+                if (outputWidth - rpad - lpad <= 0) {
+                  util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
+                    dstOffset + (y + 1) * outputWidth, fillValue)
+                } else {
+                  if (lpad > 0) util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
+                    dstOffset + y * outputWidth + lpad, fillValue)
+                  System.arraycopy(inputData, srcOffset + iy * inputWidth + ix + lpad, fInputData,
+                    dstOffset + y * outputWidth + lpad, outputWidth - rpad - lpad)
+                  if (rpad > 0) util.Arrays.fill(fInputData,
+                    dstOffset + (y + 1) * outputWidth - rpad,
+                    dstOffset + (y + 1) * outputWidth, fillValue)
+                }
+                } else {
+                  var x = 0
+                  while (x < outputWidth) {
+                    val ix = x * dW - padW + kw
+                    if (ix < 0 || ix >= inputWidth) {
+                      fInputData(dstOffset + y * outputWidth + x) = fillValue
+                    } else {
+                      fInputData(dstOffset + y * outputWidth + x) =
+                        inputData(srcOffset + iy * inputWidth + ix)
+                    }
+                    x += 1
+                  }
+                }
+            }
+            y += 1
+          }
+          k += 1
+        }
+    }
+
     def baseline(
       fInput: Tensor[Float], input: Tensor[Float], dilationW: Int, dilationH: Int,
       kW: Int, kH: Int, dW: Int, dH: Int, padL: Int, padR: Int, padT: Int, padB: Int,
@@ -438,9 +504,15 @@ object NNPrimitive {
       continuous(fInput, input, kW, kH, dW, dH, nInputPlane, inputWidth, inputHeight,
         outputWidth, outputHeight)
     } else if (padT == padB && padL == padR) {
-      fillInOrder(fInput, input, dilationW, dilationH, kW, kH, dW, dH, padL, padT,
-        nInputPlane, inputWidth, inputHeight,
-        outputWidth, outputHeight, 0)
+      if (dW == 1 && dH == 1 && outputWidth >= 128) {
+        systemcallV(fInput, input, kW, kH, dW, dH, padL, padT,
+          nInputPlane, inputWidth, inputHeight,
+          outputWidth, outputHeight, 0)
+      } else {
+        fillInOrder(fInput, input, dilationW, dilationH, kW, kH, dW, dH, padL, padT,
+          nInputPlane, inputWidth, inputHeight,
+          outputWidth, outputHeight, 0)
+      }
     } else {
       baseline(fInput, input, dilationW, dilationW,
         kW, kH, dW, dH, padL, padR, padT, padB,
