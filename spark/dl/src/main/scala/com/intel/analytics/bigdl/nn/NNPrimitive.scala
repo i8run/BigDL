@@ -33,215 +33,6 @@ object NNPrimitive {
     nInputPlane: Int, inputWidth: Int, inputHeight: Int,
     outputWidth: Int, outputHeight: Int): Unit = {
 
-    def continuous(
-      fInput: Tensor[Float], input: Tensor[Float],
-      kW: Int, kH: Int, dW: Int, dH: Int,
-      nInputPlane: Int, inputWidth: Int, inputHeight: Int,
-      outputWidth: Int, outputHeight: Int): Unit = {
-      val inputData = input.storage().array()
-      val fInputData = fInput.storage().array()
-
-      var k = 0
-      while (k < nInputPlane * kH * kW) {
-        val nip = k / (kH * kW)
-        val rest = k % (kH * kW)
-        val kh = rest / kW
-        val kw = rest % kW
-        val dstOffset = k * outputHeight * outputWidth + fInput.storageOffset() - 1
-        val srcOffset = nip * inputWidth * inputHeight + input.storageOffset() - 1
-        var y = 0
-        while (y < outputHeight) {
-          val iy = y * dH + kh
-          val ix = 0 + kw
-          if (dW == 1) {
-            System.arraycopy(inputData, srcOffset + iy * inputWidth + ix,
-              fInputData, dstOffset + y * outputWidth, outputWidth)
-          } else {
-            var x = 0
-            while (x < outputWidth) {
-              fInputData(dstOffset + y * outputWidth + x) =
-                inputData(srcOffset + iy * inputWidth + ix + x * dW)
-              x += 1
-            }
-          }
-          y += 1
-        }
-        k += 1
-      }
-    }
-
-    def fillInOrder(
-      fInput: Tensor[Float], input: Tensor[Float], dilationW: Int, dilationH: Int,
-      kW: Int, kH: Int, dW: Int, dH: Int, padW: Int, padH: Int,
-      nInputPlane: Int, inputWidth: Int, inputHeight: Int,
-      outputWidth: Int, outputHeight: Int, fillValue: Float): Unit = {
-      val inputData = input.storage().array()
-      val fInputData = fInput.storage().array()
-
-      val channelSize = inputHeight * inputWidth
-
-      var dstOffset = fInput.storageOffset() - 1
-      var srcOffset = input.storageOffset() - 1
-
-      var channel = 0
-      while (channel < nInputPlane) {
-        var kernelRow = 0
-        while (kernelRow < kH) {
-          var kernelCol = 0
-          while (kernelCol < kW) {
-
-            var inputRow = -padH + kernelRow * dilationH
-            var outputRow = 0
-
-            while (outputRow < outputHeight) {
-              if (!(inputRow >= 0 && inputRow < inputHeight)) { // padding
-              var outputCol = 0
-                while (outputCol < outputWidth) {
-                  fInputData(dstOffset) = fillValue
-                  dstOffset += 1
-                  outputCol += 1
-                }
-              } else {
-                var inputCol = -padW + kernelCol * dilationW
-                var outputCol = 0
-                while (outputCol < outputWidth) {
-                  if (inputCol >= 0 && inputCol < inputWidth) { // data
-                    fInputData(dstOffset) = inputData(srcOffset + inputRow * inputWidth +
-                      inputCol)
-                  } else { // padding
-                    fInputData(dstOffset) = fillValue
-                  }
-
-                  dstOffset += 1
-                  inputCol += dW
-                  outputCol += 1
-                } // for outputCol
-              }
-              inputRow += dH
-              outputRow += 1
-            }
-
-            kernelCol += 1
-          } // for kernelCol
-          kernelRow += 1
-        } // for kernelRow
-
-        srcOffset += channelSize // we have iterated a channel of image
-        channel += 1
-      }
-    }
-
-    def systemcallV(
-      fInput: Tensor[Float], input: Tensor[Float],
-      kW: Int, kH: Int, dW: Int, dH: Int, padW: Int, padH: Int,
-      nInputPlane: Int, inputWidth: Int, inputHeight: Int,
-      outputWidth: Int, outputHeight: Int, fillValue: Float): Unit = {
-        val inputData = input.storage().array()
-        val fInputData = fInput.storage().array()
-
-        val dilationH = 1
-        val dilationW = 1
-
-        val padT = padH
-        val padB = padH
-        val padL = padW
-        val padR = padW
-        var k = 0
-        while (k < nInputPlane * kH * kW) {
-          val nip = k / (kH * kW)
-          val rest = k % (kH * kW)
-          val kh = rest / kW
-          val kw = rest % kW
-          val dstOffset = k * outputHeight * outputWidth + fInput.storageOffset() - 1
-          val srcOffset = nip * inputWidth * inputHeight + input.storageOffset() - 1
-          var y = 0
-          while (y < outputHeight) {
-            val iy = y * dH - padH + kh
-            if (iy < 0 || iy >= inputHeight) {
-              util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
-                dstOffset + (y + 1) * outputWidth, fillValue)
-            } else {
-              if (dW == 1) {
-                val ix = 0 - padW + kw
-                val lpad = Math.max(0, padW - kw)
-                val rpad = Math.max(0, padW - (kW - kw - 1))
-                if (outputWidth - rpad - lpad <= 0) {
-                  util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
-                    dstOffset + (y + 1) * outputWidth, fillValue)
-                } else {
-                  if (lpad > 0) util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
-                    dstOffset + y * outputWidth + lpad, fillValue)
-                  System.arraycopy(inputData, srcOffset + iy * inputWidth + ix + lpad, fInputData,
-                    dstOffset + y * outputWidth + lpad, outputWidth - rpad - lpad)
-                  if (rpad > 0) util.Arrays.fill(fInputData,
-                    dstOffset + (y + 1) * outputWidth - rpad,
-                    dstOffset + (y + 1) * outputWidth, fillValue)
-                }
-                } else {
-                  var x = 0
-                  while (x < outputWidth) {
-                    val ix = x * dW - padW + kw
-                    if (ix < 0 || ix >= inputWidth) {
-                      fInputData(dstOffset + y * outputWidth + x) = fillValue
-                    } else {
-                      fInputData(dstOffset + y * outputWidth + x) =
-                        inputData(srcOffset + iy * inputWidth + ix)
-                    }
-                    x += 1
-                  }
-                }
-            }
-            y += 1
-          }
-          k += 1
-        }
-    }
-
-    def baseline(
-      fInput: Tensor[Float], input: Tensor[Float], dilationW: Int, dilationH: Int,
-      kW: Int, kH: Int, dW: Int, dH: Int, padL: Int, padR: Int, padT: Int, padB: Int,
-      nInputPlane: Int, inputWidth: Int, inputHeight: Int,
-      outputWidth: Int, outputHeight: Int, fillValue: Float): Unit = {
-      val inputData = input.storage().array()
-      val fInputData = fInput.storage().array()
-
-      val dkernelHeight = dilationH * (kH - 1) + 1
-      val dkernelWidth = dilationW * (kW - 1) + 1
-
-      val heightCol = (inputHeight + padT + padB - dkernelHeight) / dH + 1
-      val widthCol = (inputWidth + padL + padR - dkernelWidth) / dW + 1
-
-      var dstOffset = fInput.storageOffset() - 1
-      var srcOffset = input.storageOffset() - 1
-
-      val channelCol = nInputPlane * kH * kW
-      var c = 0
-      while (c < channelCol) {
-        val widthOffset = c % kW
-        val heightOffset = (c / kW) % kH
-        val channelOfImage = c / kH / kW
-        var h = 0
-        while (h < heightCol) {
-          var w = 0
-          while (w < widthCol) {
-            val padHeight = h * dH - padT + heightOffset * dilationH
-            val padWidth = w * dW - padL + widthOffset * dilationW
-            if (padHeight >= 0 && padHeight < inputHeight &&
-              padWidth >= 0 && padWidth < inputWidth) {
-              fInputData(dstOffset + (c * heightCol + h) * widthCol + w) =
-                inputData(srcOffset + (channelOfImage * inputHeight + padHeight) * inputWidth +
-                  padWidth)
-            } else {
-              fInputData(dstOffset + (c * heightCol + h) * widthCol + w) = fillValue
-            }
-            w += 1
-          }
-          h += 1
-        }
-        c += 1
-      }
-    }
-
     val dilationH = 1
     val dilationW = 1
 
@@ -250,22 +41,22 @@ object NNPrimitive {
     val padL = padW
     val padR = padW
 
-    if (padT == 0 && padB == 0 && padL == 0 && padR == 0 && dilationH == 1 && dilationW == 1) {
-      continuous(fInput, input, kW, kH, dW, dH, nInputPlane, inputWidth, inputHeight,
+    if (padH == 0 && padW == 0 && dW == 1) {
+      Im2Col.continuousFloat(
+        fInput, input,
+        kW, kH, dW, dH,
+        nInputPlane, inputWidth, inputHeight,
         outputWidth, outputHeight)
-    } else if (padT == padB && padL == padR) {
-      if (dW == 1 && dH == 1 && outputWidth >= 128) {
-        systemcallV(fInput, input, kW, kH, dW, dH, padL, padT,
-          nInputPlane, inputWidth, inputHeight,
-          outputWidth, outputHeight, 0)
-      } else {
-        fillInOrder(fInput, input, dilationW, dilationH, kW, kH, dW, dH, padL, padT,
-          nInputPlane, inputWidth, inputHeight,
-          outputWidth, outputHeight, 0)
-      }
+    } else if (outputWidth >= Im2Col.MIN_ARRAY_LENGTH || !Im2Col.useOptimization) {
+      Im2Col.arrayCopyFloat(
+        fInput, input,
+        kW, kH, dW, dH, padL, padT,
+        nInputPlane, inputWidth, inputHeight,
+        outputWidth, outputHeight, 0)
     } else {
-      baseline(fInput, input, dilationW, dilationW,
-        kW, kH, dW, dH, padL, padR, padT, padB,
+      Im2Col.fillInOrderFloat(
+        fInput, input,
+        dilationW, dilationH, kW, kH, dW, dH, padL, padT,
         nInputPlane, inputWidth, inputHeight,
         outputWidth, outputHeight, 0)
     }
@@ -279,215 +70,6 @@ object NNPrimitive {
     nInputPlane: Int, inputWidth: Int, inputHeight: Int,
     outputWidth: Int, outputHeight: Int): Unit = {
 
-    def continuous(
-      fInput: Tensor[Double], input: Tensor[Double],
-      kW: Int, kH: Int, dW: Int, dH: Int,
-      nInputPlane: Int, inputWidth: Int, inputHeight: Int,
-      outputWidth: Int, outputHeight: Int): Unit = {
-      val inputData = input.storage().array()
-      val fInputData = fInput.storage().array()
-
-      var k = 0
-      while (k < nInputPlane * kH * kW) {
-        val nip = k / (kH * kW)
-        val rest = k % (kH * kW)
-        val kh = rest / kW
-        val kw = rest % kW
-        val dstOffset = k * outputHeight * outputWidth + fInput.storageOffset() - 1
-        val srcOffset = nip * inputWidth * inputHeight + input.storageOffset() - 1
-        var y = 0
-        while (y < outputHeight) {
-          val iy = y * dH + kh
-          val ix = 0 + kw
-          if (dW == 1) {
-            System.arraycopy(inputData, srcOffset + iy * inputWidth + ix,
-              fInputData, dstOffset + y * outputWidth, outputWidth)
-          } else {
-            var x = 0
-            while (x < outputWidth) {
-              fInputData(dstOffset + y * outputWidth + x) =
-                inputData(srcOffset + iy * inputWidth + ix + x * dW)
-              x += 1
-            }
-          }
-          y += 1
-        }
-        k += 1
-      }
-    }
-
-    def fillInOrder(
-      fInput: Tensor[Double], input: Tensor[Double], dilationW: Int, dilationH: Int,
-      kW: Int, kH: Int, dW: Int, dH: Int, padW: Int, padH: Int,
-      nInputPlane: Int, inputWidth: Int, inputHeight: Int,
-      outputWidth: Int, outputHeight: Int, fillValue: Double): Unit = {
-      val inputData = input.storage().array()
-      val fInputData = fInput.storage().array()
-
-      val channelSize = inputHeight * inputWidth
-
-      var dstOffset = fInput.storageOffset() - 1
-      var srcOffset = input.storageOffset() - 1
-
-      var channel = 0
-      while (channel < nInputPlane) {
-        var kernelRow = 0
-        while (kernelRow < kH) {
-          var kernelCol = 0
-          while (kernelCol < kW) {
-
-            var inputRow = -padH + kernelRow * dilationH
-            var outputRow = 0
-
-            while (outputRow < outputHeight) {
-              if (!(inputRow >= 0 && inputRow < inputHeight)) { // padding
-              var outputCol = 0
-                while (outputCol < outputWidth) {
-                  fInputData(dstOffset) = fillValue
-                  dstOffset += 1
-                  outputCol += 1
-                }
-              } else {
-                var inputCol = -padW + kernelCol * dilationW
-                var outputCol = 0
-                while (outputCol < outputWidth) {
-                  if (inputCol >= 0 && inputCol < inputWidth) { // data
-                    fInputData(dstOffset) = inputData(srcOffset + inputRow * inputWidth +
-                      inputCol)
-                  } else { // padding
-                    fInputData(dstOffset) = fillValue
-                  }
-
-                  dstOffset += 1
-                  inputCol += dW
-                  outputCol += 1
-                } // for outputCol
-              }
-              inputRow += dH
-              outputRow += 1
-            }
-
-            kernelCol += 1
-          } // for kernelCol
-          kernelRow += 1
-        } // for kernelRow
-
-        srcOffset += channelSize // we have iterated a channel of image
-        channel += 1
-      }
-    }
-
-    def systemcallV(
-      fInput: Tensor[Double], input: Tensor[Double],
-      kW: Int, kH: Int, dW: Int, dH: Int, padW: Int, padH: Int,
-      nInputPlane: Int, inputWidth: Int, inputHeight: Int,
-      outputWidth: Int, outputHeight: Int, fillValue: Double): Unit = {
-      val inputData = input.storage().array()
-      val fInputData = fInput.storage().array()
-
-      val dilationH = 1
-      val dilationW = 1
-
-      val padT = padH
-      val padB = padH
-      val padL = padW
-      val padR = padW
-      var k = 0
-      while (k < nInputPlane * kH * kW) {
-        val nip = k / (kH * kW)
-        val rest = k % (kH * kW)
-        val kh = rest / kW
-        val kw = rest % kW
-        val dstOffset = k * outputHeight * outputWidth + fInput.storageOffset() - 1
-        val srcOffset = nip * inputWidth * inputHeight + input.storageOffset() - 1
-        var y = 0
-        while (y < outputHeight) {
-          val iy = y * dH - padH + kh
-          if (iy < 0 || iy >= inputHeight) {
-            util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
-              dstOffset + (y + 1) * outputWidth, fillValue)
-          } else {
-            if (dW == 1) {
-              val ix = 0 - padW + kw
-              val lpad = Math.max(0, padW - kw)
-              val rpad = Math.max(0, padW - (kW - kw - 1))
-              if (outputWidth - rpad - lpad <= 0) {
-                util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
-                  dstOffset + (y + 1) * outputWidth, fillValue)
-              } else {
-                if (lpad > 0) util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
-                  dstOffset + y * outputWidth + lpad, fillValue)
-                System.arraycopy(inputData, srcOffset + iy * inputWidth + ix + lpad, fInputData,
-                  dstOffset + y * outputWidth + lpad, outputWidth - rpad - lpad)
-                if (rpad > 0) util.Arrays.fill(fInputData,
-                  dstOffset + (y + 1) * outputWidth - rpad,
-                  dstOffset + (y + 1) * outputWidth, fillValue)
-              }
-            } else {
-              var x = 0
-              while (x < outputWidth) {
-                val ix = x * dW - padW + kw
-                if (ix < 0 || ix >= inputWidth) {
-                  fInputData(dstOffset + y * outputWidth + x) = fillValue
-                } else {
-                  fInputData(dstOffset + y * outputWidth + x) =
-                    inputData(srcOffset + iy * inputWidth + ix)
-                }
-                x += 1
-              }
-            }
-          }
-          y += 1
-        }
-        k += 1
-      }
-    }
-
-    def baseline(
-      fInput: Tensor[Double], input: Tensor[Double], dilationW: Int, dilationH: Int,
-      kW: Int, kH: Int, dW: Int, dH: Int, padL: Int, padR: Int, padT: Int, padB: Int,
-      nInputPlane: Int, inputWidth: Int, inputHeight: Int,
-      outputWidth: Int, outputHeight: Int, fillValue: Double): Unit = {
-      val inputData = input.storage().array()
-      val fInputData = fInput.storage().array()
-
-      val dkernelHeight = dilationH * (kH - 1) + 1
-      val dkernelWidth = dilationW * (kW - 1) + 1
-
-      val heightCol = (inputHeight + padT + padB - dkernelHeight) / dH + 1
-      val widthCol = (inputWidth + padL + padR - dkernelWidth) / dW + 1
-
-      var dstOffset = fInput.storageOffset() - 1
-      var srcOffset = input.storageOffset() - 1
-
-      val channelCol = nInputPlane * kH * kW
-      var c = 0
-      while (c < channelCol) {
-        val widthOffset = c % kW
-        val heightOffset = (c / kW) % kH
-        val channelOfImage = c / kH / kW
-        var h = 0
-        while (h < heightCol) {
-          var w = 0
-          while (w < widthCol) {
-            val padHeight = h * dH - padT + heightOffset * dilationH
-            val padWidth = w * dW - padL + widthOffset * dilationW
-            if (padHeight >= 0 && padHeight < inputHeight &&
-              padWidth >= 0 && padWidth < inputWidth) {
-              fInputData(dstOffset + (c * heightCol + h) * widthCol + w) =
-                inputData(srcOffset + (channelOfImage * inputHeight + padHeight) * inputWidth +
-                  padWidth)
-            } else {
-              fInputData(dstOffset + (c * heightCol + h) * widthCol + w) = fillValue
-            }
-            w += 1
-          }
-          h += 1
-        }
-        c += 1
-      }
-    }
-
     val dilationH = 1
     val dilationW = 1
 
@@ -496,22 +78,21 @@ object NNPrimitive {
     val padL = padW
     val padR = padW
 
-    if (padT == 0 && padB == 0 && padL == 0 && padR == 0 && dilationH == 1 && dilationW == 1) {
-      continuous(fInput, input, kW, kH, dW, dH, nInputPlane, inputWidth, inputHeight,
+    if (padH == 0 && padW == 0 && dW == 1) {
+      Im2Col.continuousDouble(
+        fInput, input,
+        kW, kH, dW, dH, nInputPlane, inputWidth, inputHeight,
         outputWidth, outputHeight)
-    } else if (padT == padB && padL == padR) {
-      if (dW == 1 && dH == 1 && outputWidth >= 128) {
-        systemcallV(fInput, input, kW, kH, dW, dH, padL, padT,
-          nInputPlane, inputWidth, inputHeight,
-          outputWidth, outputHeight, 0)
-      } else {
-        fillInOrder(fInput, input, dilationW, dilationH, kW, kH, dW, dH, padL, padT,
-          nInputPlane, inputWidth, inputHeight,
-          outputWidth, outputHeight, 0)
-      }
+    } else if (outputWidth >= Im2Col.MIN_ARRAY_LENGTH || !Im2Col.useOptimization) {
+      Im2Col.arrayCopyDouble(
+        fInput, input,
+        kW, kH, dW, dH, padL, padT,
+        nInputPlane, inputWidth, inputHeight,
+        outputWidth, outputHeight, 0)
     } else {
-      baseline(fInput, input, dilationW, dilationW,
-        kW, kH, dW, dH, padL, padR, padT, padB,
+      Im2Col.fillInOrderDouble(
+        fInput, input,
+        dilationW, dilationH, kW, kH, dW, dH, padL, padT,
         nInputPlane, inputWidth, inputHeight,
         outputWidth, outputHeight, 0)
     }
@@ -1285,6 +866,429 @@ object NNPrimitive {
         kt += 1
       }
       nip += 1
+    }
+  }
+}
+
+object Im2Col {
+  val MIN_ARRAY_LENGTH = 128
+  var useOptimization = true
+
+  def continuousFloat(
+    fInput: Tensor[Float], input: Tensor[Float],
+    kW: Int, kH: Int, dW: Int, dH: Int,
+    nInputPlane: Int, inputWidth: Int, inputHeight: Int,
+    outputWidth: Int, outputHeight: Int): Unit = {
+    val inputData = input.storage().array()
+    val fInputData = fInput.storage().array()
+
+    var k = 0
+    while (k < nInputPlane * kH * kW) {
+      val nip = k / (kH * kW)
+      val rest = k % (kH * kW)
+      val kh = rest / kW
+      val kw = rest % kW
+      val dstOffset = k * outputHeight * outputWidth + fInput.storageOffset() - 1
+      val srcOffset = nip * inputWidth * inputHeight + input.storageOffset() - 1
+      var y = 0
+      while (y < outputHeight) {
+        val iy = y * dH + kh
+        val ix = 0 + kw
+        if (dW == 1) {
+          System.arraycopy(inputData, srcOffset + iy * inputWidth + ix,
+            fInputData, dstOffset + y * outputWidth, outputWidth)
+        } else {
+          var x = 0
+          while (x < outputWidth) {
+            fInputData(dstOffset + y * outputWidth + x) =
+              inputData(srcOffset + iy * inputWidth + ix + x * dW)
+            x += 1
+          }
+        }
+        y += 1
+      }
+      k += 1
+    }
+  }
+
+  def fillInOrderFloat(
+    fInput: Tensor[Float], input: Tensor[Float], dilationW: Int, dilationH: Int,
+    kW: Int, kH: Int, dW: Int, dH: Int, padW: Int, padH: Int,
+    nInputPlane: Int, inputWidth: Int, inputHeight: Int,
+    outputWidth: Int, outputHeight: Int, fillValue: Float): Unit = {
+    val inputData = input.storage().array()
+    val fInputData = fInput.storage().array()
+
+    val channelSize = inputHeight * inputWidth
+
+    var dstOffset = fInput.storageOffset() - 1
+    var srcOffset = input.storageOffset() - 1
+
+    var channel = 0
+    while (channel < nInputPlane) {
+      var kernelRow = 0
+      while (kernelRow < kH) {
+        var kernelCol = 0
+        while (kernelCol < kW) {
+
+          var inputRow = -padH + kernelRow * dilationH
+          var outputRow = 0
+
+          while (outputRow < outputHeight) {
+            if (!(inputRow >= 0 && inputRow < inputHeight)) { // padding
+            var outputCol = 0
+              while (outputCol < outputWidth) {
+                fInputData(dstOffset) = fillValue
+                dstOffset += 1
+                outputCol += 1
+              }
+            } else {
+              var inputCol = -padW + kernelCol * dilationW
+              var outputCol = 0
+              while (outputCol < outputWidth) {
+                if (inputCol >= 0 && inputCol < inputWidth) { // data
+                  fInputData(dstOffset) = inputData(srcOffset + inputRow * inputWidth +
+                    inputCol)
+                } else { // padding
+                  fInputData(dstOffset) = fillValue
+                }
+
+                dstOffset += 1
+                inputCol += dW
+                outputCol += 1
+              } // for outputCol
+            }
+            inputRow += dH
+            outputRow += 1
+          }
+
+          kernelCol += 1
+        } // for kernelCol
+        kernelRow += 1
+      } // for kernelRow
+
+      srcOffset += channelSize // we have iterated a channel of image
+      channel += 1
+    }
+  }
+
+  def arrayCopyFloat(
+    fInput: Tensor[Float], input: Tensor[Float],
+    kW: Int, kH: Int, dW: Int, dH: Int, padW: Int, padH: Int,
+    nInputPlane: Int, inputWidth: Int, inputHeight: Int,
+    outputWidth: Int, outputHeight: Int, fillValue: Float): Unit = {
+    val inputData = input.storage().array()
+    val fInputData = fInput.storage().array()
+
+    val dilationH = 1
+    val dilationW = 1
+
+    val padT = padH
+    val padB = padH
+    val padL = padW
+    val padR = padW
+    var k = 0
+    while (k < nInputPlane * kH * kW) {
+      val nip = k / (kH * kW)
+      val rest = k % (kH * kW)
+      val kh = rest / kW
+      val kw = rest % kW
+      val dstOffset = k * outputHeight * outputWidth + fInput.storageOffset() - 1
+      val srcOffset = nip * inputWidth * inputHeight + input.storageOffset() - 1
+      var y = 0
+      while (y < outputHeight) {
+        val iy = y * dH - padH + kh
+        if (iy < 0 || iy >= inputHeight) {
+          util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
+            dstOffset + (y + 1) * outputWidth, fillValue)
+        } else {
+          if (dW == 1) {
+            val ix = 0 - padW + kw
+            val lpad = Math.max(0, padW - kw)
+            val rpad = Math.max(0, padW - (kW - kw - 1))
+            if (outputWidth - rpad - lpad <= 0) {
+              util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
+                dstOffset + (y + 1) * outputWidth, fillValue)
+            } else {
+              if (lpad > 0) util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
+                dstOffset + y * outputWidth + lpad, fillValue)
+              System.arraycopy(inputData, srcOffset + iy * inputWidth + ix + lpad, fInputData,
+                dstOffset + y * outputWidth + lpad, outputWidth - rpad - lpad)
+              if (rpad > 0) util.Arrays.fill(fInputData,
+                dstOffset + (y + 1) * outputWidth - rpad,
+                dstOffset + (y + 1) * outputWidth, fillValue)
+            }
+          } else {
+            var x = 0
+            while (x < outputWidth) {
+              val ix = x * dW - padW + kw
+              if (ix < 0 || ix >= inputWidth) {
+                fInputData(dstOffset + y * outputWidth + x) = fillValue
+              } else {
+                fInputData(dstOffset + y * outputWidth + x) =
+                  inputData(srcOffset + iy * inputWidth + ix)
+              }
+              x += 1
+            }
+          }
+        }
+        y += 1
+      }
+      k += 1
+    }
+  }
+
+  def baselineFloat(
+    fInput: Tensor[Float], input: Tensor[Float], dilationW: Int, dilationH: Int,
+    kW: Int, kH: Int, dW: Int, dH: Int, padL: Int, padR: Int, padT: Int, padB: Int,
+    nInputPlane: Int, inputWidth: Int, inputHeight: Int,
+    outputWidth: Int, outputHeight: Int, fillValue: Float): Unit = {
+    val inputData = input.storage().array()
+    val fInputData = fInput.storage().array()
+
+    val dkernelHeight = dilationH * (kH - 1) + 1
+    val dkernelWidth = dilationW * (kW - 1) + 1
+
+    val heightCol = (inputHeight + padT + padB - dkernelHeight) / dH + 1
+    val widthCol = (inputWidth + padL + padR - dkernelWidth) / dW + 1
+
+    var dstOffset = fInput.storageOffset() - 1
+    var srcOffset = input.storageOffset() - 1
+
+    val channelCol = nInputPlane * kH * kW
+    var c = 0
+    while (c < channelCol) {
+      val widthOffset = c % kW
+      val heightOffset = (c / kW) % kH
+      val channelOfImage = c / kH / kW
+      var h = 0
+      while (h < heightCol) {
+        var w = 0
+        while (w < widthCol) {
+          val padHeight = h * dH - padT + heightOffset * dilationH
+          val padWidth = w * dW - padL + widthOffset * dilationW
+          if (padHeight >= 0 && padHeight < inputHeight &&
+            padWidth >= 0 && padWidth < inputWidth) {
+            fInputData(dstOffset + (c * heightCol + h) * widthCol + w) =
+              inputData(srcOffset + (channelOfImage * inputHeight + padHeight) * inputWidth +
+                padWidth)
+          } else {
+            fInputData(dstOffset + (c * heightCol + h) * widthCol + w) = fillValue
+          }
+          w += 1
+        }
+        h += 1
+      }
+      c += 1
+    }
+  }
+
+  def continuousDouble(
+    fInput: Tensor[Double], input: Tensor[Double],
+    kW: Int, kH: Int, dW: Int, dH: Int,
+    nInputPlane: Int, inputWidth: Int, inputHeight: Int,
+    outputWidth: Int, outputHeight: Int): Unit = {
+    val inputData = input.storage().array()
+    val fInputData = fInput.storage().array()
+
+    var k = 0
+    while (k < nInputPlane * kH * kW) {
+      val nip = k / (kH * kW)
+      val rest = k % (kH * kW)
+      val kh = rest / kW
+      val kw = rest % kW
+      val dstOffset = k * outputHeight * outputWidth + fInput.storageOffset() - 1
+      val srcOffset = nip * inputWidth * inputHeight + input.storageOffset() - 1
+      var y = 0
+      while (y < outputHeight) {
+        val iy = y * dH + kh
+        val ix = 0 + kw
+        if (dW == 1) {
+          System.arraycopy(inputData, srcOffset + iy * inputWidth + ix,
+            fInputData, dstOffset + y * outputWidth, outputWidth)
+        } else {
+          var x = 0
+          while (x < outputWidth) {
+            fInputData(dstOffset + y * outputWidth + x) =
+              inputData(srcOffset + iy * inputWidth + ix + x * dW)
+            x += 1
+          }
+        }
+        y += 1
+      }
+      k += 1
+    }
+  }
+
+  def fillInOrderDouble(
+    fInput: Tensor[Double], input: Tensor[Double], dilationW: Int, dilationH: Int,
+    kW: Int, kH: Int, dW: Int, dH: Int, padW: Int, padH: Int,
+    nInputPlane: Int, inputWidth: Int, inputHeight: Int,
+    outputWidth: Int, outputHeight: Int, fillValue: Double): Unit = {
+    val inputData = input.storage().array()
+    val fInputData = fInput.storage().array()
+
+    val channelSize = inputHeight * inputWidth
+
+    var dstOffset = fInput.storageOffset() - 1
+    var srcOffset = input.storageOffset() - 1
+
+    var channel = 0
+    while (channel < nInputPlane) {
+      var kernelRow = 0
+      while (kernelRow < kH) {
+        var kernelCol = 0
+        while (kernelCol < kW) {
+
+          var inputRow = -padH + kernelRow * dilationH
+          var outputRow = 0
+
+          while (outputRow < outputHeight) {
+            if (!(inputRow >= 0 && inputRow < inputHeight)) { // padding
+            var outputCol = 0
+              while (outputCol < outputWidth) {
+                fInputData(dstOffset) = fillValue
+                dstOffset += 1
+                outputCol += 1
+              }
+            } else {
+              var inputCol = -padW + kernelCol * dilationW
+              var outputCol = 0
+              while (outputCol < outputWidth) {
+                if (inputCol >= 0 && inputCol < inputWidth) { // data
+                  fInputData(dstOffset) = inputData(srcOffset + inputRow * inputWidth +
+                    inputCol)
+                } else { // padding
+                  fInputData(dstOffset) = fillValue
+                }
+
+                dstOffset += 1
+                inputCol += dW
+                outputCol += 1
+              } // for outputCol
+            }
+            inputRow += dH
+            outputRow += 1
+          }
+
+          kernelCol += 1
+        } // for kernelCol
+        kernelRow += 1
+      } // for kernelRow
+
+      srcOffset += channelSize // we have iterated a channel of image
+      channel += 1
+    }
+  }
+
+  def arrayCopyDouble(
+    fInput: Tensor[Double], input: Tensor[Double],
+    kW: Int, kH: Int, dW: Int, dH: Int, padW: Int, padH: Int,
+    nInputPlane: Int, inputWidth: Int, inputHeight: Int,
+    outputWidth: Int, outputHeight: Int, fillValue: Double): Unit = {
+    val inputData = input.storage().array()
+    val fInputData = fInput.storage().array()
+
+    val dilationH = 1
+    val dilationW = 1
+
+    val padT = padH
+    val padB = padH
+    val padL = padW
+    val padR = padW
+    var k = 0
+    while (k < nInputPlane * kH * kW) {
+      val nip = k / (kH * kW)
+      val rest = k % (kH * kW)
+      val kh = rest / kW
+      val kw = rest % kW
+      val dstOffset = k * outputHeight * outputWidth + fInput.storageOffset() - 1
+      val srcOffset = nip * inputWidth * inputHeight + input.storageOffset() - 1
+      var y = 0
+      while (y < outputHeight) {
+        val iy = y * dH - padH + kh
+        if (iy < 0 || iy >= inputHeight) {
+          util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
+            dstOffset + (y + 1) * outputWidth, fillValue)
+        } else {
+          if (dW == 1) {
+            val ix = 0 - padW + kw
+            val lpad = Math.max(0, padW - kw)
+            val rpad = Math.max(0, padW - (kW - kw - 1))
+            if (outputWidth - rpad - lpad <= 0) {
+              util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
+                dstOffset + (y + 1) * outputWidth, fillValue)
+            } else {
+              if (lpad > 0) util.Arrays.fill(fInputData, dstOffset + y * outputWidth,
+                dstOffset + y * outputWidth + lpad, fillValue)
+              System.arraycopy(inputData, srcOffset + iy * inputWidth + ix + lpad, fInputData,
+                dstOffset + y * outputWidth + lpad, outputWidth - rpad - lpad)
+              if (rpad > 0) util.Arrays.fill(fInputData,
+                dstOffset + (y + 1) * outputWidth - rpad,
+                dstOffset + (y + 1) * outputWidth, fillValue)
+            }
+          } else {
+            var x = 0
+            while (x < outputWidth) {
+              val ix = x * dW - padW + kw
+              if (ix < 0 || ix >= inputWidth) {
+                fInputData(dstOffset + y * outputWidth + x) = fillValue
+              } else {
+                fInputData(dstOffset + y * outputWidth + x) =
+                  inputData(srcOffset + iy * inputWidth + ix)
+              }
+              x += 1
+            }
+          }
+        }
+        y += 1
+      }
+      k += 1
+    }
+  }
+
+  def baselineDouble(
+    fInput: Tensor[Double], input: Tensor[Double], dilationW: Int, dilationH: Int,
+    kW: Int, kH: Int, dW: Int, dH: Int, padL: Int, padR: Int, padT: Int, padB: Int,
+    nInputPlane: Int, inputWidth: Int, inputHeight: Int,
+    outputWidth: Int, outputHeight: Int, fillValue: Double): Unit = {
+    val inputData = input.storage().array()
+    val fInputData = fInput.storage().array()
+
+    val dkernelHeight = dilationH * (kH - 1) + 1
+    val dkernelWidth = dilationW * (kW - 1) + 1
+
+    val heightCol = (inputHeight + padT + padB - dkernelHeight) / dH + 1
+    val widthCol = (inputWidth + padL + padR - dkernelWidth) / dW + 1
+
+    var dstOffset = fInput.storageOffset() - 1
+    var srcOffset = input.storageOffset() - 1
+
+    val channelCol = nInputPlane * kH * kW
+    var c = 0
+    while (c < channelCol) {
+      val widthOffset = c % kW
+      val heightOffset = (c / kW) % kH
+      val channelOfImage = c / kH / kW
+      var h = 0
+      while (h < heightCol) {
+        var w = 0
+        while (w < widthCol) {
+          val padHeight = h * dH - padT + heightOffset * dilationH
+          val padWidth = w * dW - padL + widthOffset * dilationW
+          if (padHeight >= 0 && padHeight < inputHeight &&
+            padWidth >= 0 && padWidth < inputWidth) {
+            fInputData(dstOffset + (c * heightCol + h) * widthCol + w) =
+              inputData(srcOffset + (channelOfImage * inputHeight + padHeight) * inputWidth +
+                padWidth)
+          } else {
+            fInputData(dstOffset + (c * heightCol + h) * widthCol + w) = fillValue
+          }
+          w += 1
+        }
+        h += 1
+      }
+      c += 1
     }
   }
 }
