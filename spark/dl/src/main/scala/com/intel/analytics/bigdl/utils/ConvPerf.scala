@@ -129,18 +129,31 @@ object ConvPerf {
     Conv(96, 128, 3, 3, 1, 1, 1, 1, 32, 28, 28),
     Conv(96, 208, 3, 3, 1, 1, 1, 1, 32, 14, 14),
     Conv(96, 96, 3, 3, 1, 1, 1, 1, 32, 28, 28),
-    Conv(96, 96, 3, 3, 2, 2, 1, 1, 32, 28, 28)
+    Conv(96, 96, 3, 3, 2, 2, 1, 1, 32, 28, 28),
+    Conv(1024, 1024, 1, 1, 1, 1, 0, 0, 32, 19, 19),
+    Conv(1024, 126, 3, 3, 1, 1, 1, 1, 32, 19, 19),
+    Conv(1024, 24, 3, 3, 1, 1, 1, 1, 32, 19, 19),
+    Conv(256, 16, 3, 3, 1, 1, 1, 1, 32, 1, 1),
+    Conv(256, 84, 3, 3, 1, 1, 1, 1, 32, 1, 1),
+    Conv(256, 16, 3, 3, 1, 1, 1, 1, 32, 3, 3),
+    Conv(256, 84, 3, 3, 1, 1, 1, 1, 32, 3, 3),
+    Conv(256, 126, 3, 3, 1, 1, 1, 1, 32, 5, 5),
+    Conv(256, 24, 3, 3, 1, 1, 1, 1, 32, 5, 5),
+    Conv(512, 126, 3, 3, 1, 1, 1, 1, 32, 10, 10),
+    Conv(512, 24, 3, 3, 1, 1, 1, 1, 32, 10, 10),
+    Conv(512, 16, 3, 3, 1, 1, 1, 1, 32, 38, 38),
+    Conv(512, 84, 3, 3, 1, 1, 1, 1, 32, 38, 38)
   )
   def main(args: Array[String]): Unit = {
-    if (args.length < 1) {
-      println("[ERROR] unknown im2col method")
-    }
-
-    if (args(0) == "true") {
-      Im2Col.useOptimization = true
-    } else {
-      Im2Col.useOptimization = false
-    }
+//    if (args.length < 1) {
+//      println("[ERROR] unknown im2col method")
+//    }
+//
+//    if (args(0) == "true") {
+//      Im2Col.useOptimization = true
+//    } else {
+//      Im2Col.useOptimization = false
+//    }
 
     val warmIterations = 10
     val iterations = 100
@@ -159,19 +172,25 @@ object ConvPerf {
       val input = Tensor[Float](Array(test.batchSize, test.nInputPlane,
         test.inputHeight, test.inputWidth)).randn()
 
-      // warm up
-      for (i <- 0 until warmIterations) {
-        conv.updateOutput(input)
-      }
+//      // warm up
+//      for (i <- 0 until warmIterations) {
+//        conv.updateOutput(input)
+//      }
+//
+//      // real time
+//      val start = System.nanoTime()
+//      for (i <- 0 until iterations) {
+//        conv.updateOutput(input)
+//      }
+//      val end = System.nanoTime()
+//
+//      println(s"costs: ${(end - start) / 1e6} ms")
 
-      // real time
-      val start = System.nanoTime()
-      for (i <- 0 until iterations) {
-        conv.updateOutput(input)
-      }
-      val end = System.nanoTime()
+      val outputHeight = (test.inputHeight + 2 * test.padH - test.kH) / test.dH + 1
+      val outputWidth = (test.inputWidth + 2 * test.padW - test.kW) / test.dW + 1
 
-      println(s"costs: ${(end - start) / 1e6} ms")
+      val size = test.nInputPlane * test.kH * test.kW * outputHeight * outputWidth * 8 / 1024.0
+      println(s"$size KB -> ${size / test.nInputPlane}")
     }
   }
 }
