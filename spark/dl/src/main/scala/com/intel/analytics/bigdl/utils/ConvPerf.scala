@@ -189,8 +189,8 @@ object ConvPerf {
       val outputHeight = (test.inputHeight + 2 * test.padH - test.kH) / test.dH + 1
       val outputWidth = (test.inputWidth + 2 * test.padW - test.kW) / test.dW + 1
 
-      val size = test.nInputPlane * test.kH * test.kW * outputHeight * outputWidth * 8 / 1024.0
-      println(s"$size KB -> ${size / test.nInputPlane}")
+      val size = test.nInputPlane * test.kH * test.kW * outputHeight * outputWidth * 4 / 1024.0
+      println(s"$size KB -> ${size / test.nInputPlane} ${outputHeight * outputWidth * test.nOutputPlane * 4 / 1024}")
     }
   }
 }
