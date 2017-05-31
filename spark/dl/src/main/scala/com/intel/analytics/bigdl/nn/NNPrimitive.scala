@@ -47,7 +47,8 @@ object NNPrimitive {
         kW, kH, dW, dH,
         nInputPlane, inputWidth, inputHeight,
         outputWidth, outputHeight)
-    } else if (outputWidth >= Im2Col.MIN_ARRAY_LENGTH || !Im2Col.useOptimization) {
+    } else if (!Im2Col.useOptimization ||
+      (dW == 1 && dH == 1)) {
       Im2Col.arrayCopyFloat(
         fInput, input,
         kW, kH, dW, dH, padL, padT,
@@ -871,7 +872,7 @@ object NNPrimitive {
 }
 
 object Im2Col {
-  val MIN_ARRAY_LENGTH = 128
+  val MIN_ARRAY_LENGTH = 8
   var useOptimization = true
 
   def continuousFloat(

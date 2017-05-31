@@ -172,25 +172,19 @@ object ConvPerf {
       val input = Tensor[Float](Array(test.batchSize, test.nInputPlane,
         test.inputHeight, test.inputWidth)).randn()
 
-//      // warm up
-//      for (i <- 0 until warmIterations) {
-//        conv.updateOutput(input)
-//      }
-//
-//      // real time
-//      val start = System.nanoTime()
-//      for (i <- 0 until iterations) {
-//        conv.updateOutput(input)
-//      }
-//      val end = System.nanoTime()
-//
-//      println(s"costs: ${(end - start) / 1e6} ms")
+      // warm up
+      for (i <- 0 until warmIterations) {
+        conv.updateOutput(input)
+      }
+      conv.im2colTime = 0L
 
       val outputHeight = (test.inputHeight + 2 * test.padH - test.kH) / test.dH + 1
       val outputWidth = (test.inputWidth + 2 * test.padW - test.kW) / test.dW + 1
 
-      val size = test.nInputPlane * test.kH * test.kW * outputHeight * outputWidth * 4 / 1024.0
-      println(s"$size KB -> ${size / test.nInputPlane} ${outputHeight * outputWidth * test.nOutputPlane * 4 / 1024}")
+      val outputHeight = (test.inputHeight + 2 * test.padH - test.kH) / test.dH + 1
+      val outputWidth = (test.inputWidth + 2 * test.padW - test.kW) / test.dW + 1
+
+      println(s"$test $outputWidth ${(end - start) / 1e6} ${conv.getIm2ColTime / 1e6}")
     }
   }
 }
