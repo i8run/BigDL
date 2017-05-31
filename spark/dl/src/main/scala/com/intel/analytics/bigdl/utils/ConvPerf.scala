@@ -178,8 +178,11 @@ object ConvPerf {
       }
       conv.im2colTime = 0L
 
-      val outputHeight = (test.inputHeight + 2 * test.padH - test.kH) / test.dH + 1
-      val outputWidth = (test.inputWidth + 2 * test.padW - test.kW) / test.dW + 1
+      val start = System.nanoTime()
+      for (i <- 0 until iterations) {
+        conv.updateOutput(input)
+      }
+      val end = System.nanoTime()
 
       val outputHeight = (test.inputHeight + 2 * test.padH - test.kH) / test.dH + 1
       val outputWidth = (test.inputWidth + 2 * test.padW - test.kW) / test.dW + 1

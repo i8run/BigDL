@@ -25,6 +25,7 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 
 object CacheMM{
   val cores = Runtime.getRuntime.availableProcessors() / 2
+  println(s"cores = $cores")
 
   // TODO use default
   val context = new ExecutionContext {
@@ -45,6 +46,7 @@ object CacheMM{
 
   def invoke[T](task: () => T): Future[T] = {
     Future {
+      println("current is running")
       task()
     }(context)
   }
@@ -118,33 +120,33 @@ object CacheMM{
 
     val frameSize = conv.kH * conv.kW * outputHeight * outputWidth
     for (i <- 0 until cores) {
-      output(i) = Tensor[Float]().resize(Array(conv.nOutputPlane, outputHeight * outputWidth))
+      // output(i) = Tensor[Float]().resize(Array(conv.nOutputPlane, outputHeight * outputWidth))
       output(i).fill(0)
 
-      dataCol(i) = Tensor[Float]().resize(Array(conv.nInputPlane, conv.kW * conv.kH,
+      dataCol(i) = dataCol(i).view(Array(conv.nInputPlane, conv.kW * conv.kH,
         outputHeight * outputWidth)).randn()
       weight(i) = Tensor[Float]().resize(Array(conv.nOutputPlane, conv.kH * conv.kW)).randn()
     }
 
     oneChannel += time {
-      var i = 0
-      while (i < cores) {
-        val _i = i
+      // var i = 0
+      // while (i < cores) {
+      //   val _i = i
 
-        var j = 0
-        results(i) = invoke(() => while (j < conv.nInputPlane) {
-          val _j = j
-          val outputFrame = output(_i)
-          val weightFrame = weight(_i)
-          val dataColFrame = dataCol(_i).select(1, _j + 1)
-          mul(outputFrame, weightFrame, dataColFrame)
-          j += 1
-        })
+      //   var j = 0
+      //   results(i) = invoke(() => while (j < conv.nInputPlane) {
+      //     val _j = j
+      //     val outputFrame = output(_i)
+      //     val weightFrame = weight(_i)
+      //     val dataColFrame = dataCol(_i).select(1, _j + 1)
+      //     mul(outputFrame, weightFrame, dataColFrame)
+      //     j += 1
+      //   })
 
-        i += 1
-      }
+      //   i += 1
+      // }
 
-      sync(results)
+      // sync(results)
     }
 //    println(s"$elapsed")
 
@@ -262,8 +264,26 @@ object CacheMM{
   )
 
   def main(args: Array[String]): Unit = {
-    for (test <- convParams) {
-      one(test)
+    if (args.length < 1) {
+      println("usage: cmd ...")
+      System.exit(1)
     }
+
+    val Array(nInputPlane, nOutputPlane, kW, kH, dW, dH, padW, padH, batchSize,
+      inputHeight, inputWidth) = args.map(_.toInt)
+    
+    val conv = Conv(nInputPlane,
+      nOutputPlane,
+      kW,
+      kH,
+      dW,
+      dH,
+      padW,
+      padH,
+      batchSize,
+      inputHeight,
+      inputWidth)
+
+    one(conv)
   }
 }
