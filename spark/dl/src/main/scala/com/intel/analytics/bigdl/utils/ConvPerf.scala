@@ -176,7 +176,7 @@ object ConvPerf {
       for (i <- 0 until warmIterations) {
         conv.updateOutput(input)
       }
-      conv.im2colTime = 0L
+      // conv.im2colTime = 0L
 
       val start = System.nanoTime()
       for (i <- 0 until iterations) {
