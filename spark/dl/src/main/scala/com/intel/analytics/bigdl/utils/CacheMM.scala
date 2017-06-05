@@ -65,40 +65,6 @@ object CacheMM {
     val ldb = k
     val ldc = m
 
-//    val m = 3
-//    val k = 2
-//    val n = 3
-//
-//    val lda = m
-//    val ldb = k
-//    val ldc = m
-//
-//    val a = Array[Float](1, 2, 3, 4, 5, 6)
-//    val b = Array[Float](1, 2, 3, 4, 5, 6)
-//    val c = new Array[Float](9)
-//    java.util.Arrays.fill(c, 0.0f)
-//
-//    MKL.vsgemm(
-//      'N',
-//      'N',
-//      m,
-//      n,
-//      k,
-//      1,
-//      a,
-//      0,
-//      lda,
-//      b,
-//      0,
-//      ldb,
-//      0,
-//      c,
-//      0,
-//      ldc
-//    )
-//
-//    println(c.mkString("\t"))
-
     var oneImageTime = 0.0
     oneImageTime += time {
       var i = 0
@@ -116,8 +82,6 @@ object CacheMM {
           Await.result(f, Duration.Inf)
       }
     }
-
-    println(oneImageTime)
 
     var oneChannel = 0.0
     for (i <- 0 until cores) {
@@ -160,7 +124,64 @@ object CacheMM {
   }
 
   def main(args: Array[String]): Unit = {
-    val conv = Conv(512, 84, 3, 3, 1, 1, 1, 1, 32, 38, 38)
+    if (args.length < 1) {
+      println("usage: cmd ...")
+      System.exit(1)
+    }
+
+    val Array(nInputPlane, nOutputPlane, kW, kH, dW, dH, padW, padH, batchSize,
+      inputHeight, inputWidth) = args.map(_.toInt)
+
+    val conv = Conv(nInputPlane,
+      nOutputPlane,
+      kW,
+      kH,
+      dW,
+      dH,
+      padW,
+      padH,
+      batchSize,
+      inputHeight,
+      inputWidth)
+
     one(conv)
   }
+  //    val m = 3
+  //    val k = 2
+  //    val n = 3
+  //
+  //    val lda = m
+  //    val ldb = k
+  //    val ldc = m
+  //
+  //    val a = Array[Float](1, 2, 3, 4, 5, 6)
+  //    val b = Array[Float](7, 8, 9, 10, 11, 12)
+  //    val c = new Array[Float](9)
+  //    java.util.Arrays.fill(c, 0.0f)
+  //
+  //    MKL.vsgemm(
+  //      'N',
+  //      'N',
+  //      m,
+  //      n,
+  //      k,
+  //      1,
+  //      a,
+  //      0,
+  //      lda,
+  //      b,
+  //      0,
+  //      ldb,
+  //      0,
+  //      c,
+  //      0,
+  //      ldc
+  //    )
+
+  // the result should be
+  // 39 49 69
+  // 54 68 82
+  // 69 87 105
+  //    println(c.mkString("\t"))
+
 }
