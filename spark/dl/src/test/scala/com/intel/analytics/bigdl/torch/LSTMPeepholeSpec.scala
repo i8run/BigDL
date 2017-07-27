@@ -27,7 +27,7 @@ import com.intel.analytics.bigdl.utils.T
 import scala.collection.mutable.ArrayBuffer
 import scala.sys.process._
 
-@com.intel.analytics.bigdl.tags.Serial
+@com.intel.analytics.bigdl.tags.Parallel
 class LSTMPeepholeSpec  extends TorchSpec {
   override def torchCheck(): Unit = {
     if (!TH.hasTorch()) {
@@ -235,7 +235,8 @@ class LSTMPeepholeSpec  extends TorchSpec {
          |gradInput = model.gradInput
     """.stripMargin
 
-    val (luaTime, torchResult) = TH.run(code,
+    val th = new NewTH
+    val (luaTime, torchResult) = th.run(code,
       Map("input" -> input.transpose(1, 2), "weights" -> weights2Torch,
         "labels" -> SplitTable[Double](1).forward(labels.t())),
       Array("output", "err", "parameters", "gradParameters", "output2", "gradInput", "err2"))
@@ -291,6 +292,7 @@ class LSTMPeepholeSpec  extends TorchSpec {
     val prediction = logOutput.max(3)._2
 
     luaOutput2 should be(loss(0) +- 1e-5)
+    th.release()
   }
 
 
@@ -503,7 +505,8 @@ class LSTMPeepholeSpec  extends TorchSpec {
     """.stripMargin
     scala.Seq
 
-    val (luaTime, torchResult) = TH.run(code,
+    val th = new NewTH
+    val (luaTime, torchResult) = th.run(code,
       Map("input" -> input.transpose(1, 2), "weights" -> weights2Torch,
         "labels" -> SplitTable[Double](1).forward(labels.t())),
       Array("output", "err", "parameters", "gradParameters", "output2", "gradInput", "err2"))
@@ -568,6 +571,7 @@ class LSTMPeepholeSpec  extends TorchSpec {
     val logOutput = logSoftMax.forward(output)
 
     luaOutput2.toFloat should be(loss(0) +- 2e-2f)
+    th.release()
   }
 
 

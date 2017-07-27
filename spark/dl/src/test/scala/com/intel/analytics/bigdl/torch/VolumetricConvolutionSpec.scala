@@ -23,7 +23,7 @@ import com.intel.analytics.bigdl.utils.RandomGenerator._
 
 import scala.util.Random
 
-@com.intel.analytics.bigdl.tags.Serial
+@com.intel.analytics.bigdl.tags.Parallel
 class VolumetricConvolutionSpec extends TorchSpec {
     "A VolumetricConvolution" should "generate correct output" in {
     torchCheck()
@@ -60,7 +60,8 @@ class VolumetricConvolutionSpec extends TorchSpec {
       "bias = layer.bias \n" +
       "output = layer:forward(input)"
 
-    val (luaTime, torchResult) = TH.run(code, Map("input" -> input),
+    val th = new NewTH
+    val (luaTime, torchResult) = th.run(code, Map("input" -> input),
       Array("weight", "bias", "output"))
 
     val luaWeight = torchResult("weight").asInstanceOf[Tensor[Double]]
@@ -73,6 +74,7 @@ class VolumetricConvolutionSpec extends TorchSpec {
     weight should be (luaWeight)
     bias should be (luaBias)
     output should be (luaOutput)
+    th.release()
   }
 
   "A VolumetricConvolution without bias" should "generate correct output" in {
@@ -110,7 +112,8 @@ class VolumetricConvolutionSpec extends TorchSpec {
       "bias = layer.bias \n" +
       "output = layer:forward(input) "
 
-    val (luaTime, torchResult) = TH.run(code, Map("input" -> input),
+    val th = new NewTH
+    val (luaTime, torchResult) = th.run(code, Map("input" -> input),
       Array("weight", "bias", "output"))
 
     val luaWeight = torchResult("weight").asInstanceOf[Tensor[Double]]
@@ -123,6 +126,7 @@ class VolumetricConvolutionSpec extends TorchSpec {
     weight should be (luaWeight)
     bias should be (luaBias)
     output should be (luaOutput)
+    th.release()
   }
 
 
@@ -162,7 +166,8 @@ class VolumetricConvolutionSpec extends TorchSpec {
       "bias = layer.bias \n" +
       "output = layer:forward(input) "
 
-    val (luaTime, torchResult) = TH.run(code, Map("input" -> input),
+    val th = new NewTH
+    val (luaTime, torchResult) = th.run(code, Map("input" -> input),
       Array("weight", "bias", "output"))
 
     val luaWeight = torchResult("weight").asInstanceOf[Tensor[Double]]
@@ -175,6 +180,7 @@ class VolumetricConvolutionSpec extends TorchSpec {
     weight should be (luaWeight)
     bias should be (luaBias)
     output shouldEqual luaOutput
+    th.release()
   }
 
   "A VolumetricConvolution with batch input no bias" should "generate correct output" in {
@@ -213,7 +219,8 @@ class VolumetricConvolutionSpec extends TorchSpec {
       "bias = layer.bias \n" +
       "output = layer:forward(input) "
 
-    val (luaTime, torchResult) = TH.run(code, Map("input" -> input),
+    val th = new NewTH
+    val (luaTime, torchResult) = th.run(code, Map("input" -> input),
       Array("weight", "bias", "output"))
 
     val luaWeight = torchResult("weight").asInstanceOf[Tensor[Double]]
@@ -226,6 +233,7 @@ class VolumetricConvolutionSpec extends TorchSpec {
     weight should be (luaWeight)
     bias should be (luaBias)
     output should be (luaOutput)
+    th.release()
   }
 
   "A VolumetricConvolution" should "be good in gradient check for input" in {
