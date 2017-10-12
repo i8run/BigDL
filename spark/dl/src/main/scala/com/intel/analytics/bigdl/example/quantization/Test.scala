@@ -53,23 +53,10 @@ object Test {
       }
 
       val loadedModel = if (param.model != "lenet") {
-        if (path.endsWith(".pb")) {
-          Sequential[Float]()
-            .add(ShuffleWithPermutation(Array(1, 3, 4, 2))).add(loadTF(path))
-        } else {
-          Module.loadModule[Float](path)
-        }
+        Module.loadModule[Float](path)
       } else {
-        val reshape = Reshape[Float](Array(1, 28, 28))
-        val newModel = Sequential[Float]()
-
-        if (path.endsWith(".pb")) {
-          Sequential[Float]().add(Reshape(Array(1, 28, 28)))
-            .add(ShuffleWithPermutation(Array(1, 3, 4, 2))).add(loadTF(path))
-        } else {
-          Sequential[Float]().add(Reshape(Array(1, 28, 28)))
-            .add(Module.loadModule[Float](path))
-        }
+        Sequential[Float]().add(Reshape(Array(1, 28, 28)))
+          .add(Module.loadModule[Float](path))
       }
 
       val model = if (param.quantize) {
