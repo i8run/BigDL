@@ -79,6 +79,7 @@ object Utils {
       case m if m.toLowerCase.contains("resnet") && m.toLowerCase.contains("cifar10") =>
         sc.parallelize(ResNetUtils.loadTest(folder), partitionNum)
       case "vgg_16" => imagenet
+      case "vgg_19" => imagenet
 
       case _ => throw new UnsupportedOperationException(s"unknown model: $model")
     }
