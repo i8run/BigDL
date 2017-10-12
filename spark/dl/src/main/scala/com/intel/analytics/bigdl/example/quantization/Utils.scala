@@ -121,7 +121,7 @@ object Utils {
         BytesToBGRImg() -> BGRImgNormalizer(ResNetCifar10DataSet.trainMean,
           ResNetCifar10DataSet.trainStd) -> BGRImgToSample()
 
-      case "vgg_16" =>
+      case m if "vgg_16" == m || "vgg_19" == m =>
         BytesToBGRImg(normalize = 1f) ->
           BGRImgCropper(224, 224, CropCenter) ->
           BGRImgNormalizer(123, 117, 104, 1, 1, 1) -> BGRImgToSample(toRGB = false)
