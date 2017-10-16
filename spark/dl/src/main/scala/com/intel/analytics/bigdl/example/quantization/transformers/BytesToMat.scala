@@ -1,0 +1,54 @@
+/*
+ * Copyright 2016 The BigDL Authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.intel.analytics.bigdl.example.quantization.transformers
+
+import java.nio.ByteBuffer
+
+import com.intel.analytics.bigdl.dataset.{ByteRecord, Transformer}
+import com.intel.analytics.zoo.transform.vision.image.ImageFeature
+import com.intel.analytics.zoo.transform.vision.image.opencv.{OpenCV, OpenCVMat}
+import org.opencv.core.CvType
+
+import scala.collection.Iterator
+
+class BytesToMat()
+  extends Transformer[ByteRecord, ImageFeature] {
+  override def apply(prev: Iterator[ByteRecord]): Iterator[ImageFeature] = {
+    prev.map(byteRecord => {
+      val rawData = byteRecord.data
+      val imgBuffer = ByteBuffer.wrap(rawData)
+      val width = imgBuffer.getInt
+      val height = imgBuffer.getInt
+      val bytes = new Array[Byte](3 * width * height)
+      System.arraycopy(imgBuffer.array(), 8, bytes, 0, bytes.length)
+      val mat = new OpenCVMat()
+      mat.create(height, width, CvType.CV_8UC3)
+      mat.put(0, 0, bytes)
+      val feature = new ImageFeature()
+      feature(ImageFeature.mat) = mat
+      feature(ImageFeature.originalW) = mat.width()
+      feature(ImageFeature.originalH) = mat.height()
+      feature(ImageFeature.label) = byteRecord.label
+      feature
+    })
+  }
+}
+
+object BytesToMat {
+  OpenCV.load()
+  def apply(): BytesToMat = new BytesToMat()
+}

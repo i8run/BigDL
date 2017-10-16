@@ -109,7 +109,7 @@ object MlUtils {
       case TorchModel =>
         Module.loadTorch[T](param.modelPath)
       case BigDlModel =>
-        Module.load[T](param.modelPath)
+        Module.loadModule[T](param.modelPath)
       case _ => throw new IllegalArgumentException(s"${param.modelType}")
     }
     model

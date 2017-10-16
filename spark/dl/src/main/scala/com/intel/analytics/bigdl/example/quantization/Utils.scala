@@ -16,19 +16,22 @@
 
 package com.intel.analytics.bigdl.example.quantization
 
-import com.intel.analytics.bigdl.Module
-import com.intel.analytics.bigdl.dataset.image._
-import com.intel.analytics.bigdl.dataset.{ByteRecord, DataSet, Sample, Transformer}
-import com.intel.analytics.bigdl.models.lenet.{Utils => LeNetUtils}
-import com.intel.analytics.bigdl.models.vgg.{Utils => VggUtils}
-import com.intel.analytics.bigdl.models.resnet.{Cifar10DataSet => ResNetCifar10DataSet, Utils => ResNetUtils}
-import com.intel.analytics.bigdl.nn.Module
-import com.intel.analytics.bigdl.optim.{Top1Accuracy, Top5Accuracy, ValidationMethod, ValidationResult}
-import com.intel.analytics.bigdl.tensor.Tensor
-import com.intel.analytics.bigdl.utils.caffe.CaffeLoader
 import java.io.{File, FileOutputStream, PrintWriter}
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Paths}
+
+import com.intel.analytics.bigdl.Module
+import com.intel.analytics.bigdl.dataset.image._
+import com.intel.analytics.bigdl.dataset.{ByteRecord, DataSet, Sample, Transformer}
+import com.intel.analytics.bigdl.example.quantization.Utils.loadMeanFile
+import com.intel.analytics.bigdl.example.quantization.transformers._
+import com.intel.analytics.bigdl.models.lenet.{Utils => LeNetUtils}
+import com.intel.analytics.bigdl.models.resnet.{Cifar10DataSet => ResNetCifar10DataSet, Utils => ResNetUtils}
+import com.intel.analytics.bigdl.models.vgg.{Utils => VggUtils}
+import com.intel.analytics.bigdl.optim.{Top1Accuracy, Top5Accuracy, ValidationMethod, ValidationResult}
+import com.intel.analytics.bigdl.tensor.Tensor
+import com.intel.analytics.zoo.transform.vision.image.MatToFloats
+import com.intel.analytics.zoo.transform.vision.image.augmentation.{CenterCrop, Resize}
 import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
 import scopt.OptionParser
@@ -58,74 +61,43 @@ object Utils {
     opt[Boolean]('q', "quantize")
             .text("Quantize the model?")
             .action((x, c) => c.copy(quantize = x))
+
   }
 
   def getRddData(model: String, sc: SparkContext, partitionNum: Int,
     folder: String): RDD[ByteRecord] = {
-    def imagenet: RDD[ByteRecord] = DataSet.SeqFileFolder.filesToRdd(folder, sc, 1000)
     model match {
-      case "lenet" =>
-        val validationData = folder + "/t10k-images-idx3-ubyte"
-        val validationLabel = folder + "/t10k-labels-idx1-ubyte"
-        sc.parallelize(LeNetUtils.load(validationData, validationLabel), partitionNum)
-
-      case "vgg" =>
-        sc.parallelize(VggUtils.loadTest(folder), partitionNum)
-
-      case m if m.contains("alexnet") => imagenet
-      case m if m.contains("inception_v1") || m.contains("googlenet") => imagenet
-      case "inception_v2" => imagenet
-      case m if m.toLowerCase.contains("resnet") && !m.toLowerCase.contains("cifar10") => imagenet
+      case "lenet" => LeNet.rdd(folder, sc, partitionNum)
+      case "vgg" => Cifar.rdd(folder, sc, partitionNum)
+      case m if m.contains("alexnet") => ImageNet.rdd(folder, sc, partitionNum)
+      case m if m.contains("inception_v1") || m.contains("googlenet") => ImageNet.rdd(folder,
+        sc, partitionNum)
+      case "inception_v2" => ImageNet.rdd(folder, sc, partitionNum)
+      case m if m.toLowerCase.contains("resnet") && !m.toLowerCase.contains("cifar10") =>
+        ImageNet.rdd(folder, sc, partitionNum)
       case m if m.toLowerCase.contains("resnet") && m.toLowerCase.contains("cifar10") =>
-        sc.parallelize(ResNetUtils.loadTest(folder), partitionNum)
-      case "vgg_16" => imagenet
-      case "vgg_19" => imagenet
+        Cifar.rdd(folder, sc, partitionNum)
+      case "vgg_16" => ImageNet.rdd(folder, sc, partitionNum)
+      case "vgg_19" => ImageNet.rdd(folder, sc, partitionNum)
 
       case _ => throw new UnsupportedOperationException(s"unknown model: $model")
     }
   }
 
   def getTransformer(model: String): Transformer[ByteRecord, Sample[Float]] = {
-    def imagenetPreprocessing(imageSize: Int): Transformer[ByteRecord, Sample[Float]] = {
-      val name = Paths.get(System.getProperty("user.dir"), "mean.txt").toString
-      val means = loadMeanFile(name)
-      BytesToBGRImg(normalize = 1f) -> BGRImgCropper(256, 256, CropCenter) ->
-              BGRImgPixelNormalizer(means) -> BGRImgCropper(imageSize, imageSize, CropCenter) ->
-              BGRImgToSample(toRGB = false)
-    }
-
     model match {
-      case "lenet" =>
-        BytesToGreyImg(28, 28) -> GreyImgNormalizer(LeNetUtils.testMean,
-          LeNetUtils.testStd) -> GreyImgToSample()
-
-      case "vgg_on_cifar" =>
-        BytesToBGRImg() -> BGRImgNormalizer(VggUtils.testMean, VggUtils.testStd) -> BGRImgToSample()
-
-      case m if m.contains("alexnet") => imagenetPreprocessing(227)
-
+      case "lenet" => LeNet.transformer()
+      case "vgg_on_cifar" => Cifar.transformer()
+      case m if m.contains("alexnet") => ImageNet.caffe(227, 227, true)
       case m if m.contains("inception_v1") || m.contains("googlenet") =>
-        BytesToBGRImg(normalize = 1f) ->
-                BGRImgCropper(224, 224, CropCenter) ->
-                BGRImgNormalizer(123, 117, 104, 1, 1, 1) -> BGRImgToSample(toRGB = false)
-
+        ImageNet.caffe(224, 224, withMean = false)
       case "inception_v2" =>
-        BytesToBGRImg() -> BGRImgCropper(224, 224, CropCenter) ->
-                HFlip(0.5) -> BGRImgNormalizer(0.485, 0.456, 0.406, 0.229, 0.224, 0.225) ->
-                BGRImgToSample()
-
+        ImageNet.caffe(224, 224, withMean = false)
       case m if m.toLowerCase.contains("resnet") && !m.toLowerCase.contains("cifar10") =>
-        BytesToBGRImg() -> BGRImgNormalizer(0.485, 0.456, 0.406, 0.229, 0.224, 0.225) ->
-                BGRImgCropper(224, 224, CropCenter) -> BGRImgToSample()
+        ImageNet.torch(224, 224)
       case m if m.toLowerCase.contains("resnet") && m.toLowerCase.contains("cifar10") =>
-        BytesToBGRImg() -> BGRImgNormalizer(ResNetCifar10DataSet.trainMean,
-          ResNetCifar10DataSet.trainStd) -> BGRImgToSample()
-
-      case m if "vgg_16" == m || "vgg_19" == m =>
-        BytesToBGRImg(normalize = 1f) ->
-          BGRImgCropper(224, 224, CropCenter) ->
-          BGRImgNormalizer(123, 117, 104, 1, 1, 1) -> BGRImgToSample(toRGB = false)
-
+        Cifar.transformer()
+      case m if "vgg_16" == m || "vgg_19" == m => ImageNet.caffe(224, 224, withMean = false)
       case _ => throw new UnsupportedOperationException(s"unknown model: $model")
     }
   }
@@ -170,56 +142,6 @@ object Utils {
     out.close()
   }
 
-  def writeToLog(model: String, totalNum: Int, accuracies: Array[(Float, Float)],
-    costs: List[Double]): Unit = {
-    val name = Paths.get(System.getProperty("user.dir"), "model_inference.log").toString
-    val file = new File(name)
-
-    val out = if (file.exists() && !file.isDirectory) {
-      new PrintWriter(new FileOutputStream(new File(name), true))
-    } else {
-      new PrintWriter(name)
-    }
-
-    out.append(model)
-    out.append("\t" + totalNum.toString)
-    accuracies.foreach(a => out.append(s"\t${a._1}-${a._2}"))
-    out.append(s"\t${costs.mkString("-")}")
-    out.append("\n")
-    out.close()
-  }
-
-  def testAll(name: String, model: Module[Float], evaluationSet: RDD[Sample[Float]],
-    batchSize: Int): Unit = {
-    val (modelResult, modelCosts) = time {
-      test(model, evaluationSet, batchSize)
-    }
-
-    val quantizedModel = model.quantize()
-    val (quantizedModelResult, quantizedModelCosts) = time {
-      test(quantizedModel, evaluationSet, batchSize)
-    }
-
-    require(modelResult.length > 0, s"unknown result")
-    val totalNum = modelResult(0)._1.result()._2
-
-    val accuracies = new Array[(Float, Float)](modelResult.length)
-    modelResult.indices.foreach { i =>
-      val accuracy = (modelResult(i)._1.result()._1, quantizedModelResult(i)._1.result()._1)
-      accuracies(i) = accuracy
-    }
-
-    val costs = List(modelCosts, quantizedModelCosts).map { x =>
-      Math.round(totalNum / x * 100) / 100.0
-    }
-
-    writeToLog(name, totalNum, accuracies, costs)
-  }
-
-  def convertModelFromCaffe(prototxt: String, caffeModel: String): Module[Float] = {
-    CaffeLoader.loadCaffe[Float](prototxt, caffeModel)._1
-  }
-
   def loadMeanFile(path: String): Tensor[Float] = {
     val lines = Files.readAllLines(Paths.get(path), StandardCharsets.UTF_8)
     val array = new Array[Float](lines.size())
@@ -229,5 +151,60 @@ object Utils {
     }
 
     Tensor[Float](array, Array(array.length))
+  }
+}
+
+object ImageNet {
+  def caffe(outputHeight: Int, outputWidth: Int,
+    withMean: Boolean): Transformer[ByteRecord, Sample[Float]] = {
+    if (!withMean) {
+      BytesToMat() ->
+        Resize(256, 256) ->
+        CenterCrop(outputHeight, outputWidth) ->
+        MatToFloats(outputHeight, outputWidth, meanRGB = Some(123f, 117f, 104f)) ->
+        FeatureToSample(toRGB = false)
+    } else {
+      val name = Paths.get(System.getProperty("user.dir"), "mean.txt").toString
+      val means = loadMeanFile(name)
+      BytesToMat() ->
+        Resize(256, 256) ->
+        MatNormWithMeanFile(means) ->
+        CenterCrop(outputHeight, outputWidth) ->
+        MatToFloats(outputHeight, outputWidth) ->
+        FeatureToSample(toRGB = false)
+    }
+  }
+
+  def torch(outputHeight: Int,
+    outputWidth: Int): Transformer[ByteRecord, Sample[Float]] = {
+    BytesToBGRImg() -> BGRImgCropper(224, 224, CropCenter) ->
+      HFlip(0.5) -> BGRImgNormalizer(0.485, 0.456, 0.406, 0.229, 0.224, 0.225) ->
+      BGRImgToSample()
+  }
+
+  def rdd(folder: String, sc: SparkContext, partitionNum: Int): RDD[ByteRecord] =
+    DataSet.SeqFileFolder.filesToRdd(folder, sc, partitionNum)
+}
+
+object LeNet {
+  def rdd(folder: String, sc: SparkContext, partitionNum: Int): RDD[ByteRecord] = {
+    val validationData = folder + "/t10k-images-idx3-ubyte"
+    val validationLabel = folder + "/t10k-labels-idx1-ubyte"
+    sc.parallelize(LeNetUtils.load(validationData, validationLabel), partitionNum)
+  }
+
+  def transformer(): Transformer[ByteRecord, Sample[Float]] = {
+    BytesToGreyImg(28, 28) -> GreyImgNormalizer(LeNetUtils.testMean,
+      LeNetUtils.testStd) -> GreyImgToSample()
+  }
+}
+
+object Cifar {
+  def rdd(folder: String, sc: SparkContext, partitionNum: Int): RDD[ByteRecord] = {
+    sc.parallelize(VggUtils.loadTest(folder), partitionNum)
+  }
+
+  def transformer(): Transformer[ByteRecord, Sample[Float]] = {
+    BytesToBGRImg() -> BGRImgNormalizer(VggUtils.testMean, VggUtils.testStd) -> BGRImgToSample()
   }
 }

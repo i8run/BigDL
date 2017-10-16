@@ -131,7 +131,7 @@ object ImageNetSeqFileGenerator {
               val imageIter = if (param.isResize) {
                 LocalImgReaderWithName(param.scaleSize, param.scaleSize, 255f)(iter)
               } else {
-                LocalImgReaderWithName(param.scaleSize)(iter)
+                LocalImgReaderWithName(BGRImage.NO_SCALE)(iter)
               }
               val fileIter = BGRImgToLocalSeqFile(param.blockSize, Paths.get(param.output, "val",
                   s"imagenet-seq-$tid"), param.hasName)(imageIter)
