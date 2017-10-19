@@ -183,7 +183,7 @@ object ImageNet {
   }
 
   def rdd(folder: String, sc: SparkContext, partitionNum: Int): RDD[ByteRecord] =
-    DataSet.SeqFileFolder.filesToRdd(folder, sc, partitionNum)
+    DataSet.SeqFileFolder.filesToRdd(folder, sc, 1000)
 }
 
 object LeNet {
