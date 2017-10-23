@@ -119,7 +119,7 @@ object Utils {
   }
 
   def writeToLog(model: String, quantized: Boolean, totalNum: Int, accuracies: Array[Float],
-    costs: Double): Unit = {
+    costs: Double, throughput: Double): Unit = {
     val name = Paths.get(System.getProperty("user.dir"), "model_inference.log").toString
     val file = new File(name)
 
@@ -138,6 +138,7 @@ object Utils {
     out.append("\t" + totalNum.toString)
     accuracies.foreach(a => out.append(s"\t${a}"))
     out.append(s"\t${costs}")
+    out.append(s"\t${throughput}")
     out.append("\n")
     out.close()
   }

@@ -79,9 +79,9 @@ object Test {
         accuracies(i) = modelResult(i)._1.result()._1
       }
 
-      val costs = Math.round(totalNum / modelCosts * 100) / 100.0
+      val throughput = Math.round(totalNum / modelCosts * 100) / 100.0
 
-      writeToLog(param.model, param.quantize, totalNum, accuracies, costs)
+      writeToLog(param.model, param.quantize, totalNum, accuracies, modelCosts, throughput)
 
       sc.stop()
     }

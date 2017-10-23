@@ -20,8 +20,7 @@ import java.nio.ByteBuffer
 
 import com.intel.analytics.bigdl.dataset.{ByteRecord, Transformer}
 import com.intel.analytics.zoo.transform.vision.image.ImageFeature
-import com.intel.analytics.zoo.transform.vision.image.opencv.{OpenCV, OpenCVMat}
-import org.opencv.core.CvType
+import com.intel.analytics.zoo.transform.vision.image.opencv.OpenCVMat
 
 import scala.collection.Iterator
 
@@ -35,9 +34,7 @@ class BytesToMat()
       val height = imgBuffer.getInt
       val bytes = new Array[Byte](3 * width * height)
       System.arraycopy(imgBuffer.array(), 8, bytes, 0, bytes.length)
-      val mat = new OpenCVMat()
-      mat.create(height, width, CvType.CV_8UC3)
-      mat.put(0, 0, bytes)
+      val mat = OpenCVMat.pixelsBytesToMat(bytes, height, width)
       val feature = new ImageFeature()
       feature(ImageFeature.mat) = mat
       feature(ImageFeature.originalW) = mat.width()
@@ -49,6 +46,5 @@ class BytesToMat()
 }
 
 object BytesToMat {
-  OpenCV.load()
   def apply(): BytesToMat = new BytesToMat()
 }
