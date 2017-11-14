@@ -288,4 +288,28 @@ class SparseTensorMathSpec extends FlatSpec with Matchers {
 
     res shouldEqual correctRes
   }
+
+  "coo 2 csr" should "work correctly" in {
+    val rows = Array(0, 0, 0, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4)
+    val numOfRows = 5
+//    val rows = Array(1, 2)
+//    val numOfRows = 3
+
+    println(SparseTensorBLAS.coo2csr(rows, numOfRows).mkString("\t"))
+
+    val rowIndexes = SparseTensorBLAS.coo2csr(rows, numOfRows)
+
+    rowIndexes should be (Array(0, 3, 5, 8, 11, 13))
+  }
+
+  "coo 2 csr" should "work correctly 2" in {
+    val rows = Array(1, 2)
+    val numOfRows = 3
+
+    println(SparseTensorBLAS.coo2csr(rows, numOfRows).mkString("\t"))
+
+    val rowIndexes = SparseTensorBLAS.coo2csr(rows, numOfRows)
+
+    rowIndexes should be (Array(0, 0, 1, 2))
+  }
 }

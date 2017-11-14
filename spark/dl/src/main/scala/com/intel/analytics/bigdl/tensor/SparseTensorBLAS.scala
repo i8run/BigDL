@@ -16,6 +16,7 @@
 
 package com.intel.analytics.bigdl.tensor
 
+import com.intel.analytics.bigdl.mkl.MKL
 import com.intel.analytics.bigdl.tensor.TensorNumericMath._
 
 object SparseTensorBLAS {
@@ -128,13 +129,13 @@ object SparseTensorBLAS {
     (alpha, mat1, mat2, beta, r)  match {
       case (alpha: Float, a: SparseTensor[Float], x: DenseTensor[Float],
             beta: Float, y: DenseTensor[Float]) =>
-        scoomm(alpha, a, x, beta, y)
+        scsrmm(alpha, a, x, beta, y)
       case (alpha: Double, a: SparseTensor[Double], x: DenseTensor[Double],
             beta: Double, y: DenseTensor[Double]) =>
         dcoomm(alpha, a, x, beta, y)
       case (alpha: Float, a: DenseTensor[Float], x: SparseTensor[Float],
             beta: Float, y: DenseTensor[Float]) =>
-        scoomm(alpha, a, x, beta, y)
+        scsrmm(alpha, a, x, beta, y)
       case (alpha: Double, a: DenseTensor[Double], x: SparseTensor[Double],
             beta: Double, y: DenseTensor[Double]) =>
         dcoomm(alpha, a, x, beta, y)
@@ -371,5 +372,84 @@ object SparseTensorBLAS {
         index += 1
       }
     }
+  }
+
+  /**
+   * convert coo layout to csr layout
+   */
+  def coo2csr(rows: Array[Int], numOfRows: Int): Array[Int] = {
+    val rowIndexes = new Array[Int](numOfRows + 1)
+    for (i <- 0 until numOfRows) {
+      val v = rows.indexOf(i)
+
+      if (v <= -1 && i == 0) {
+        rowIndexes(i) = 0
+      } else if (v <= -1) {
+        rowIndexes(i) = rowIndexes(i - 1)
+      } else {
+        rowIndexes(i) = v
+      }
+    }
+
+    // the last element index needs to add 1.
+    rowIndexes(numOfRows) = rows.length
+
+    rowIndexes
+  }
+
+  def scsrmm(alpha: Float, A: SparseTensor[Float], B: DenseTensor[Float],
+    beta: Float, C: DenseTensor[Float], transA: Boolean = false): Unit = {
+    require(A.size().length == 2 && B.size().length == 2,
+      s"only support 2-D SparseTensor x 2-D DenseTensor")
+
+    val (m, kA, kB, n) = (A.size(1), A.size(2), B.size(1), B.size(2))
+    val k = kA
+
+    val matrixDescA = Array[Byte]('g', 'l', 'n', 'c')
+
+    val a = A.storage().array()
+    val aOffset = A.storageOffset() - 1
+    val columns = A.indices(2).array().slice(aOffset, aOffset + A._nElement)
+    val rows = A.indices(1).array().slice(A._indicesOffset(0),
+      A._indicesOffset(0) + A._nElement).map { x =>
+      x - A._indicesOffset(0)
+    }
+    val rowIndexes = coo2csr(rows, m)
+
+    val eB = if (B.stride(2) != 1 && B.size(2) != B.stride(1)) { // if B should be transposed.
+      B.contiguous().asInstanceOf[DenseTensor[Float]]
+    } else {
+      B
+    }
+
+    val b = eB.storage().array()
+    val bOffset = eB.storageOffset() - 1
+    val ldb = n
+
+    val c = C._storage.array()
+    val cOffset = C.storageOffset() - 1
+    val ldc = n
+
+    MKL.scsrmm(if (transA) 'T' else 'N', m, n, k, alpha, matrixDescA,
+      a, aOffset, columns, rowIndexes,
+      b, bOffset, ldb, beta,
+      c, cOffset, ldc)
+  }
+
+  def scsrmm(
+    alpha: Float,
+    A: DenseTensor[Float],
+    B: SparseTensor[Float],
+    beta: Float,
+    C: DenseTensor[Float]): Unit = {
+    require(A.size().length == 2 && B.size().length == 2,
+      s"only support 2-D SparseTensor x 2-D DenseTensor")
+    val transposeA = A.t().contiguous().asInstanceOf[DenseTensor[Float]]
+    scsrmm(alpha, B, transposeA, beta, C, transA = true)
+
+    val ordering: Byte = 'R'
+    val trans: Byte = 'T'
+    MKL.imatcopy(ordering, trans, B.size(2), A.size(1), 1.0f,
+      C.storage().array(), C.storageOffset() - 1, A.size(1), B.size(2))
   }
 }

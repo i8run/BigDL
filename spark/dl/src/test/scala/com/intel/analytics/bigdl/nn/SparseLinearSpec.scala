@@ -76,8 +76,8 @@ class SparseLinearSpec extends FlatSpec with Matchers {
     val out2 = l.forward(input)
     val gradInput2 = l.backward(input, gradOutput)
     out1 should be (out2)
-    gradInput1 should be (gradInput2)
     sl.getParameters()._2 should be (l.getParameters()._2)
+    gradInput1 should be (gradInput2)
   }
 
   "Sparse Linear" should "return the same result with Linear 4" in {
@@ -99,7 +99,8 @@ class SparseLinearSpec extends FlatSpec with Matchers {
 
   "Sparse Linear" should "return the same result with Linear 5" in {
     val gradOutput = Tensor(4, 2).rand()
-    val input = Tensor(4, 10).apply1(_ => Random.nextInt(10) / 9 * Random.nextFloat())
+    Random.setSeed(10)
+    val input = Tensor(4, 10).apply1(_ => Random.nextInt(10) / 5 * Random.nextFloat())
     val sl = SparseLinear(10, 2, backwardStart = 5, backwardLength = 5)
     val l = Linear(10, 2)
     l.weight.copy(sl.weight)

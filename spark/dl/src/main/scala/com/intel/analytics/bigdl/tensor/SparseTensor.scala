@@ -64,6 +64,7 @@ private[tensor] class SparseTensor[@specialized(Float, Double) T: ClassTag](
 
   // todo: add transpose, indices order, count from 0
   // var indices_order = Array.range(0, _shape.length)
+  var _transposed = false
 
   require(_shape.length == _indices.length, s"indices' size doesn't match tensor shape, " +
     s"indices' length is ${_indices.length} and tensor shape is ${_shape.mkString(" x ")}")
@@ -1040,6 +1041,10 @@ private[tensor] class SparseTensor[@specialized(Float, Double) T: ClassTag](
 
   override def reduce(dim: Int, result: Tensor[T], reducer: (T, T) => T): Tensor[T] = {
     throw new UnsupportedOperationException(s"SparseTensor: Unimplemented method")
+  }
+
+  def indices(dim: Int): Storage[Int] = {
+    _indices(dim - 1)
   }
 }
 
