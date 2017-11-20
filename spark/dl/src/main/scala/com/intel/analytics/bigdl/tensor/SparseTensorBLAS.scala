@@ -129,13 +129,13 @@ object SparseTensorBLAS {
     (alpha, mat1, mat2, beta, r)  match {
       case (alpha: Float, a: SparseTensor[Float], x: DenseTensor[Float],
             beta: Float, y: DenseTensor[Float]) =>
-        scsrmm(alpha, a, x, beta, y)
+        scoomm(alpha, a, x, beta, y)
       case (alpha: Double, a: SparseTensor[Double], x: DenseTensor[Double],
             beta: Double, y: DenseTensor[Double]) =>
         dcoomm(alpha, a, x, beta, y)
       case (alpha: Float, a: DenseTensor[Float], x: SparseTensor[Float],
             beta: Float, y: DenseTensor[Float]) =>
-        scsrmm(alpha, a, x, beta, y)
+        scoomm(alpha, a, x, beta, y)
       case (alpha: Double, a: DenseTensor[Double], x: SparseTensor[Double],
             beta: Double, y: DenseTensor[Double]) =>
         dcoomm(alpha, a, x, beta, y)
@@ -176,14 +176,23 @@ object SparseTensorBLAS {
     var index = 0
     if (B.stride(2) == 1 && B.size(2) == B.stride(1)) {
       while (index < A.nElement()) {
-        val curMA = ArowIndices(index + AstorageOffset) - ArowOffset
-        val curKA = AcolIndices(index + AstorageOffset) - AcolOffset
-        var n = 0
-        while (n < nB) {
-          Cvals(curMA * nB + n) += alpha * Avals(index + AstorageOffset) *
-            Bvals(curKA * nB + n + bOffset)
-          n += 1
-        }
+//        val curMA = ArowIndices(index + AstorageOffset) - ArowOffset
+//        val curKA = AcolIndices(index + AstorageOffset) - AcolOffset
+//        var n = 0
+//        while (n < nB) {
+//          Cvals(curMA * nB + n) += alpha * Avals(index + AstorageOffset) *
+//            Bvals(curKA * nB + n + bOffset)
+//          n += 1
+//        }
+
+        // MKL gemv version
+        val aValue = Avals(index + AstorageOffset)
+        val m = A._indices(0).array().apply(index) // 0 based
+        val k = A._indices(1).array().apply(index) // 0 based
+        val CRowM = C.select(1, m + 1)
+        val BRowK = B.select(1, k + 1)
+        MKL.vsaxpy(kB, alpha, BRowK.storage().array(), BRowK.storageOffset() - 1, 1,
+          CRowM.storage().array(), CRowM.storageOffset() - 1, 1)
         index += 1
       }
     } else {
@@ -416,24 +425,49 @@ object SparseTensorBLAS {
     }
     val rowIndexes = coo2csr(rows, m)
 
-    val eB = if (B.stride(2) != 1 && B.size(2) != B.stride(1)) { // if B should be transposed.
-      B.contiguous().asInstanceOf[DenseTensor[Float]]
-    } else {
-      B
+    val bShouldTrans = B.stride(2) != 1 && B.size(2) != B.stride(1)
+
+    if (bShouldTrans) { // if B should be transposed.
+      var i = 0
+      while (i < columns.length) {
+        columns(i) += 1
+        i += 1
+      }
+
+      i = 0
+      while (i < rows.length) {
+        rows(i) += 1
+        i += 1
+      }
+
+      i = 0
+      while (i < rowIndexes.length) {
+        rowIndexes(i) += 1
+        i += 1
+      }
+
+      matrixDescA(3) = 'f'.toByte
     }
 
-    val b = eB.storage().array()
-    val bOffset = eB.storageOffset() - 1
-    val ldb = n
+    val b = B.storage().array()
+    val bOffset = B.storageOffset() - 1
+    val ldb = if (bShouldTrans) { k } else { n }
 
     val c = C._storage.array()
     val cOffset = C.storageOffset() - 1
-    val ldc = n
+    val ldc = if (bShouldTrans) { m } else { n }
 
     MKL.scsrmm(if (transA) 'T' else 'N', m, n, k, alpha, matrixDescA,
       a, aOffset, columns, rowIndexes,
       b, bOffset, ldb, beta,
       c, cOffset, ldc)
+
+    if (bShouldTrans) {
+      val ordering: Byte = 'R'
+      val trans: Byte = 'T'
+      MKL.imatcopy(ordering, trans, C.size(2), C.size(1), 1.0f,
+        C.storage().array(), C.storageOffset() - 1, C.size(1), C.size(2))
+    }
   }
 
   def scsrmm(
@@ -444,9 +478,10 @@ object SparseTensorBLAS {
     C: DenseTensor[Float]): Unit = {
     require(A.size().length == 2 && B.size().length == 2,
       s"only support 2-D SparseTensor x 2-D DenseTensor")
-    val transposeA = A.t().contiguous().asInstanceOf[DenseTensor[Float]]
+    val transposeA = A.t().asInstanceOf[DenseTensor[Float]] // .contiguous()
     scsrmm(alpha, B, transposeA, beta, C, transA = true)
 
+    A.t()
     val ordering: Byte = 'R'
     val trans: Byte = 'T'
     MKL.imatcopy(ordering, trans, B.size(2), A.size(1), 1.0f,
