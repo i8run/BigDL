@@ -186,25 +186,34 @@ object SparseTensorBLAS {
 //        }
 
         // MKL gemv version
-        val aValue = Avals(index + AstorageOffset)
-        val m = A._indices(0).array().apply(index) // 0 based
-        val k = A._indices(1).array().apply(index) // 0 based
+        val aValue = Avals(index + AstorageOffset) * alpha
+        val m = ArowIndices(index + AstorageOffset) - ArowOffset
+        val k = AcolIndices(index + AstorageOffset) - AcolOffset
         val CRowM = C.select(1, m + 1)
         val BRowK = B.select(1, k + 1)
-        MKL.vsaxpy(kB, alpha, BRowK.storage().array(), BRowK.storageOffset() - 1, 1,
+        MKL.vsaxpy(nB, aValue, BRowK.storage().array(), BRowK.storageOffset() - 1, 1,
           CRowM.storage().array(), CRowM.storageOffset() - 1, 1)
+
         index += 1
       }
     } else {
       while (index < A.nElement()) {
-        val curMA = ArowIndices(index + AstorageOffset) - ArowOffset
-        val curKA = AcolIndices(index + AstorageOffset) - AcolOffset
-        var n = 0
-        while (n < nB) {
-          Cvals(curMA * nB + n + cOffset) += alpha * Avals(index + AstorageOffset) *
-            Bvals(curKA + n * kB + bOffset)
-          n += 1
-        }
+//        val curMA = ArowIndices(index + AstorageOffset) - ArowOffset
+//        val curKA = AcolIndices(index + AstorageOffset) - AcolOffset
+//        var n = 0
+//        while (n < nB) {
+//          Cvals(curMA * nB + n + cOffset) += alpha * Avals(index + AstorageOffset) *
+//            Bvals(curKA + n * kB + bOffset)
+//          n += 1
+//        }
+
+        val aValue = Avals(index + AstorageOffset) * alpha
+        val m = ArowIndices(index + AstorageOffset) - ArowOffset
+        val k = AcolIndices(index + AstorageOffset) - AcolOffset
+        val CRowM = C.select(1, m + 1)
+        MKL.vsaxpy(nB, aValue, Bvals, B.storageOffset() - 1 + k, kB,
+          CRowM.storage().array(), CRowM.storageOffset() - 1, 1)
+
         index += 1
       }
 
@@ -301,26 +310,42 @@ object SparseTensorBLAS {
     var index = 0
     if (A.stride(2) == 1 && A.size(2) == A.stride(1)) {
       while (index < B.nElement()) {
-        val curKB = BrowIndices(index + BstorageOffset) - BrowIndicesOffset
-        val curNB = BcolIndices(index + BstorageOffset) - BcolIndicesOffset
-        var n = 0
-        while (n < mA) {
-          Cvals(n * nB + curNB + cOffset) += alpha * Bvals(index + BstorageOffset) *
-            Avals(n * kA + curKB + aOffset)
-          n += 1
-        }
+//        val curKB = BrowIndices(index + BstorageOffset) - BrowIndicesOffset
+//        val curNB = BcolIndices(index + BstorageOffset) - BcolIndicesOffset
+//        var n = 0
+//        while (n < mA) {
+//          Cvals(n * nB + curNB + cOffset) += alpha * Bvals(index + BstorageOffset) *
+//            Avals(n * kA + curKB + aOffset)
+//          n += 1
+//        }
+
+        // MKL axpy version
+        val bValue = Bvals(index + BstorageOffset) * alpha
+        val k = BrowIndices(index + BstorageOffset) - BrowIndicesOffset
+        val n = BcolIndices(index + BstorageOffset) - BcolIndicesOffset
+        MKL.vsaxpy(mA, bValue, Avals, aOffset + k, kA, Cvals, cOffset + n, nB)
+
         index += 1
       }
     } else {
       while (index < B.nElement()) {
-        val curKB = BrowIndices(index + BstorageOffset) - BrowIndicesOffset
-        val curNB = BcolIndices(index + BstorageOffset) - BcolIndicesOffset
-        var n = 0
-        while (n < mA) {
-          Cvals(n * nB + curNB + cOffset) += alpha * Bvals(index + BstorageOffset) *
-            Avals(n + mA * curKB + aOffset)
-          n += 1
-        }
+//        val curKB = BrowIndices(index + BstorageOffset) - BrowIndicesOffset
+//        val curNB = BcolIndices(index + BstorageOffset) - BcolIndicesOffset
+//        var n = 0
+//        while (n < mA) {
+//          Cvals(n * nB + curNB + cOffset) += alpha * Bvals(index + BstorageOffset) *
+//            Avals(n + mA * curKB + aOffset)
+//          n += 1
+//        }
+
+        // MKL axpy version
+        val bValue = Bvals(index + BstorageOffset) * alpha
+        val k = BrowIndices(index + BstorageOffset) - BrowIndicesOffset
+        val n = BcolIndices(index + BstorageOffset) - BcolIndicesOffset
+        val ACol = A.select(2, k + 1)
+        val AColVals = ACol.storage().array()
+        val AColOffset = ACol.storageOffset() - 1
+        MKL.vsaxpy(mA, bValue, AColVals, AColOffset, 1, Cvals, cOffset + n, nB)
         index += 1
       }
     }
