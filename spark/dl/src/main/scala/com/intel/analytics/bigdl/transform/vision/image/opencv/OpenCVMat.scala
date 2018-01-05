@@ -213,4 +213,11 @@ object OpenCVMat {
     input.get(0, 0, floats)
     (floats, input.height(), input.width())
   }
+
+  def pixelsBytesToMat(pixels: Array[Byte], height: Int, width: Int): OpenCVMat = {
+    val mat = new OpenCVMat()
+    mat.create(height, width, CvType.CV_8UC3)
+    mat.put(0, 0, pixels)
+    mat
+  }
 }

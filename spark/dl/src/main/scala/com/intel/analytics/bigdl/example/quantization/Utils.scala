@@ -161,7 +161,7 @@ object ImageNet {
     if (!withMean) {
       val means = new Array[Float](outputHeight * outputWidth * 3)
       var i = 0
-      while (i < 375 * 500 * 3) {
+      while (i < outputHeight * outputWidth * 3) {
         means(i) = 123f
         means(i + 1) = 117f
         means(i + 2) = 104f

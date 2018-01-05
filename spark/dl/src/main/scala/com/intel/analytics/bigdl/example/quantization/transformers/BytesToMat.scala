@@ -34,7 +34,7 @@ class BytesToMat()
       val height = imgBuffer.getInt
       val bytes = new Array[Byte](3 * width * height)
       System.arraycopy(imgBuffer.array(), 8, bytes, 0, bytes.length)
-      val mat = OpenCVMat.fromImageBytes(bytes)
+      val mat = OpenCVMat.pixelsBytesToMat(bytes, height, width)
       val feature = new ImageFeature()
       feature(ImageFeature.mat) = mat
       feature(ImageFeature.originalSize) = mat.shape()
