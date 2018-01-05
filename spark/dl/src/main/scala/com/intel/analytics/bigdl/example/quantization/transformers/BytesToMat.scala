@@ -19,8 +19,8 @@ package com.intel.analytics.bigdl.example.quantization.transformers
 import java.nio.ByteBuffer
 
 import com.intel.analytics.bigdl.dataset.{ByteRecord, Transformer}
-import com.intel.analytics.zoo.transform.vision.image.ImageFeature
-import com.intel.analytics.zoo.transform.vision.image.opencv.OpenCVMat
+import com.intel.analytics.bigdl.transform.vision.image.ImageFeature
+import com.intel.analytics.bigdl.transform.vision.image.opencv.OpenCVMat
 
 import scala.collection.Iterator
 
@@ -34,11 +34,10 @@ class BytesToMat()
       val height = imgBuffer.getInt
       val bytes = new Array[Byte](3 * width * height)
       System.arraycopy(imgBuffer.array(), 8, bytes, 0, bytes.length)
-      val mat = OpenCVMat.pixelsBytesToMat(bytes, height, width)
+      val mat = OpenCVMat.fromImageBytes(bytes)
       val feature = new ImageFeature()
       feature(ImageFeature.mat) = mat
-      feature(ImageFeature.originalW) = mat.width()
-      feature(ImageFeature.originalH) = mat.height()
+      feature(ImageFeature.originalSize) = mat.shape()
       feature(ImageFeature.label) = byteRecord.label
       feature
     })

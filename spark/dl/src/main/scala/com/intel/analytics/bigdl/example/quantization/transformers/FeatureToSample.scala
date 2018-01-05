@@ -18,7 +18,7 @@ package com.intel.analytics.bigdl.example.quantization.transformers
 
 import com.intel.analytics.bigdl.dataset.{Sample, Transformer}
 import com.intel.analytics.bigdl.tensor.Tensor
-import com.intel.analytics.zoo.transform.vision.image.ImageFeature
+import com.intel.analytics.bigdl.transform.vision.image.ImageFeature
 
 import scala.collection.Iterator
 

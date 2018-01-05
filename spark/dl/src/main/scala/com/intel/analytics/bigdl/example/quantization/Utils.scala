@@ -30,8 +30,8 @@ import com.intel.analytics.bigdl.models.resnet.{Cifar10DataSet => ResNetCifar10D
 import com.intel.analytics.bigdl.models.vgg.{Utils => VggUtils}
 import com.intel.analytics.bigdl.optim.{Top1Accuracy, Top5Accuracy, ValidationMethod, ValidationResult}
 import com.intel.analytics.bigdl.tensor.Tensor
-import com.intel.analytics.zoo.transform.vision.image.MatToFloats
-import com.intel.analytics.zoo.transform.vision.image.augmentation.{CenterCrop, Resize}
+import com.intel.analytics.bigdl.transform.vision.image.MatToFloats
+import com.intel.analytics.bigdl.transform.vision.image.augmentation.{CenterCrop, PixelNormalizer, Resize}
 import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
 import scopt.OptionParser
@@ -159,10 +159,20 @@ object ImageNet {
   def caffe(outputHeight: Int, outputWidth: Int,
     withMean: Boolean): Transformer[ByteRecord, Sample[Float]] = {
     if (!withMean) {
+      val means = new Array[Float](outputHeight * outputWidth * 3)
+      var i = 0
+      while (i < 375 * 500 * 3) {
+        means(i) = 123f
+        means(i + 1) = 117f
+        means(i + 2) = 104f
+        i += 3
+      }
+
       BytesToMat() ->
         Resize(256, 256) ->
         CenterCrop(outputHeight, outputWidth) ->
-        MatToFloats(outputHeight, outputWidth, meanRGB = Some(123f, 117f, 104f)) ->
+        PixelNormalizer(means) ->
+        MatToFloats() ->
         FeatureToSample(toRGB = false)
     } else {
       val name = Paths.get(System.getProperty("user.dir"), "mean.txt").toString
