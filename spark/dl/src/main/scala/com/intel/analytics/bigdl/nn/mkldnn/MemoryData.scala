@@ -46,29 +46,15 @@ case class NativeData(private var _shape: Array[Int], private var _layout: Int) 
 }
 
 private[mkldnn] object MemoryData {
-  def isCompatible(actuals: Array[MemoryData], expects: Array[MemoryData]): Boolean = {
-    if (actuals.length != expects.length) return false
-    actuals.zip(expects).foreach { case (actual, expect) =>
-      if (!isSizeCompatible(actual, expect)) return false
-      actual match {
-        case h: HeapData =>
-          expect match {
-            case hh: HeapData =>
-              if (hh.layout != MklDnn.MemoryFormat.any && hh.layout != h.layout) return false
-            case nn: NativeData => return false
-            case _ => throw new UnsupportedOperationException("Not support such memory format")
-          }
-        case n: NativeData =>
-          expect match {
-            case hh: HeapData => return false
-            case nn: NativeData =>
-              if (nn.layout != MklDnn.MemoryFormat.any && nn.layout != n.layout) return false
-            case _ => throw new UnsupportedOperationException("Not support such memory format")
-          }
-        case _ => throw new UnsupportedOperationException("Not support such memory format")
-      }
-    }
+
+  def noUndef(formats: Array[MemoryData]): Boolean = {
+    if (formats == null || formats.length == 0) return true
+    formats.foreach(f => if (f.layout == MklDnn.MemoryFormat.format_undef) return false)
     return true
+  }
+
+  def isFixed(formats: MemoryData): Boolean = {
+    formats.layout == MklDnn.MemoryFormat.format_undef
   }
 
   def isSizeCompatible(actual: MemoryData, expect: MemoryData): Boolean = {
