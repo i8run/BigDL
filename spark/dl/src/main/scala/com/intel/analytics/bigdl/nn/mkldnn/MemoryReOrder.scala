@@ -18,7 +18,7 @@ package com.intel.analytics.bigdl.nn.mkldnn
 
 import breeze.linalg
 import breeze.linalg.dim
-import com.intel.analytics.bigdl.mkl.MklDnn
+import com.intel.analytics.bigdl.mkl.{Memory, MklDnn}
 import com.intel.analytics.bigdl.nn.abstractnn.{DataFormat, TensorModule}
 import com.intel.analytics.bigdl.tensor.{DnnTensor, MklDnnTensor, Tensor}
 
@@ -28,8 +28,8 @@ import scala.reflect.ClassTag
 /**
  * when from mkldnn layer to bigdl layer, there need to do reorder for input or gradOutput
  */
-class MemoryReOrder(inputFormat: Int = MklDnn.MemoryFormat.any,
-                    outputFormat: Int = MklDnn.MemoryFormat.nchw) extends TensorModule[Float] {
+class MemoryReOrder(inputFormat: Int = Memory.Format.any,
+                    outputFormat: Int = Memory.Format.nchw) extends TensorModule[Float] {
 
   @transient
   private var engine: Long = 0L
@@ -67,7 +67,7 @@ class MemoryReOrder(inputFormat: Int = MklDnn.MemoryFormat.any,
     this
   }
 
-  require(outputFormat != MklDnn.MemoryFormat.any,
+  require(outputFormat != Memory.Format.any,
           "output format in MemoryReOrder should not be any")
 
   // convert input from input format to output format
@@ -91,7 +91,7 @@ class MemoryReOrder(inputFormat: Int = MklDnn.MemoryFormat.any,
         internal_inputFormat = input.getFormat()
         input.getPrimitiveDesc()
       } else {
-        require(inputFormat != MklDnn.MemoryFormat.any,
+        require(inputFormat != Memory.Format.any,
                 "input format in MemoryReOrder should not be any")
         val prim_md = MklDnn.MemoryDescInit(dim, sizes, dataType, internal_inputFormat)
         MklDnn.MemoryPrimitiveDescCreate(prim_md, engine)
@@ -183,8 +183,8 @@ class MemoryReOrder(inputFormat: Int = MklDnn.MemoryFormat.any,
 }
 
 object MemoryReOrder {
-  def apply[T: ClassTag](inputFormat: Int = MklDnn.MemoryFormat.any,
-      outputFormat: Int = MklDnn.MemoryFormat.nchw): MemoryReOrder = {
+  def apply[T: ClassTag](inputFormat: Int = Memory.Format.any,
+      outputFormat: Int = Memory.Format.nchw): MemoryReOrder = {
     new MemoryReOrder(inputFormat, outputFormat)
   }
 }

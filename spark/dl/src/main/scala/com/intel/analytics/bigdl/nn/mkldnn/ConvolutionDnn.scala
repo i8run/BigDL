@@ -56,14 +56,14 @@ class ConvolutionDnn(
   @transient
   private var stream: Long = 0L
 
-  private val internal_format = MklDnn.MemoryFormat.any
+  private val internal_format = Memory.Format.any
   private val input_format = this.format.value match {
-    case "NHWC" => MklDnn.MemoryFormat.nhwc
-    case "NCHW" => MklDnn.MemoryFormat.nchw
+    case "NHWC" => Memory.Format.nhwc
+    case "NCHW" => Memory.Format.nchw
   }
   this.output_format = input_format
 
-  private var weightDnnFormat = MklDnn.MemoryFormat.oihw
+  private var weightDnnFormat = Memory.Format.oihw
   private var internal_inputFormat: Int = input_format
   private var internal_gradOutputFormat: Int = input_format
   private var internal_weightFormat: Int = weightDnnFormat
@@ -99,14 +99,14 @@ class ConvolutionDnn(
   private val weightShape = format match {
     case DataFormat.NCHW =>
       if (nGroup == 1) {
-        weightDnnFormat = MklDnn.MemoryFormat.oihw
+        weightDnnFormat = Memory.Format.oihw
         Array(nOutputPlane, nInputPlane, kernelH, kernelW)
       } else {
-        weightDnnFormat = MklDnn.MemoryFormat.goihw
+        weightDnnFormat = Memory.Format.goihw
         Array(nGroup, nOutputPlane / nGroup, nInputPlane / nGroup, kernelH, kernelW)
       }
     case DataFormat.NHWC =>
-      weightDnnFormat = MklDnn.MemoryFormat.hwio
+      weightDnnFormat = Memory.Format.hwio
       Array(kernelH, kernelW, nInputPlane, nOutputPlane)
   }
 
@@ -379,7 +379,7 @@ class ConvolutionDnn(
 
       src_md = MklDnnOps.memoryDescInit(input.dim(), input_size, dataType, this.internal_format)
       weights_md = MklDnnOps.memoryDescInit(dimWeight, weightSize, dataType, this.internal_format)
-      bias_md = MklDnnOps.memoryDescInit(1, biasSize, dataType, MklDnn.MemoryFormat.x)
+      bias_md = MklDnnOps.memoryDescInit(1, biasSize, dataType, Memory.Format.x)
       // for output
       val dst_md = MklDnnOps.memoryDescInit(output.dim(), dst_sizes, dataType, this.internal_format)
 
@@ -707,7 +707,7 @@ class ConvolutionDnn(
         dataType, engine)
 
      // for gradBias
-     val gradBias_md = MklDnnOps.memoryDescInit(1, biasSize, dataType, MklDnn.MemoryFormat.x)
+     val gradBias_md = MklDnnOps.memoryDescInit(1, biasSize, dataType, Memory.Format.x)
      gradBias_memory = MklDnnOps.createMemoryPrimitive(gradBias_md, engine)
 
      val weights_desc = MklDnnOps.convBackwardWeightsDescInit(

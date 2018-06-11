@@ -62,10 +62,10 @@ class ConvolutionDnnSpec extends FlatSpec with Matchers {
     val conv_strides = Array(1, 1)
     val conv_padding = Array(1, 1)
 
-    val conv_src_md = MklDnnOps.memoryDescInit(4, conv_src_sizes, MklDnn.DataType.f32, MklDnn.MemoryFormat.any)
-    val conv_weights_md = MklDnnOps.memoryDescInit(4, conv_weights_sizes, MklDnn.DataType.f32, MklDnn.MemoryFormat.any)
-    val conv_bias_md = MklDnnOps.memoryDescInit(1, conv_bias_sizes, MklDnn.DataType.f32, MklDnn.MemoryFormat.x)
-    val conv_dst_md = MklDnnOps.memoryDescInit(4, conv_dst_sizes, MklDnn.DataType.f32, MklDnn.MemoryFormat.any)
+    val conv_src_md = MklDnnOps.memoryDescInit(4, conv_src_sizes, MklDnn.DataType.f32, Memory.Format.any)
+    val conv_weights_md = MklDnnOps.memoryDescInit(4, conv_weights_sizes, MklDnn.DataType.f32, Memory.Format.any)
+    val conv_bias_md = MklDnnOps.memoryDescInit(1, conv_bias_sizes, MklDnn.DataType.f32, Memory.Format.x)
+    val conv_dst_md = MklDnnOps.memoryDescInit(4, conv_dst_sizes, MklDnn.DataType.f32, Memory.Format.any)
 
     val conv_any_desc = MklDnnOps.convForwardDescInit(
                     MklDnn.PropKind.forward, MklDnn.AlgKind.convolutionDirect,

@@ -16,8 +16,8 @@
 
 package com.intel.analytics.bigdl.nn.mkldnn
 
-import com.intel.analytics.bigdl.mkl.MklDnn
 import com.intel.analytics.bigdl.mkl.MklDnn.{EngineType, StreamType}
+import com.intel.analytics.bigdl.mkl.{Memory, MklDnn}
 import com.intel.analytics.bigdl.nn
 import com.intel.analytics.bigdl.nn.abstractnn.TensorModule
 import com.intel.analytics.bigdl.tensor.Tensor
@@ -64,10 +64,10 @@ class SoftMax[T: ClassTag]()(implicit ev: TensorNumeric[T]) extends TensorModule
 
     if (forwardPrim == 0L) {
       val (format, ndim, dims, axis) = input.dim() match {
-        case 1 => (MklDnn.MemoryFormat.x, 1, input.size(), 0)
-        case 2 => (MklDnn.MemoryFormat.nc, 2, input.size(), 1)
-        case 3 => (MklDnn.MemoryFormat.nchw, 4, Array(1) ++ input.size(), 1)
-        case 4 => (MklDnn.MemoryFormat.nchw, 4, input.size(), 1)
+        case 1 => (Memory.Format.x, 1, input.size(), 0)
+        case 2 => (Memory.Format.nc, 2, input.size(), 1)
+        case 3 => (Memory.Format.nchw, 4, Array(1) ++ input.size(), 1)
+        case 4 => (Memory.Format.nchw, 4, input.size(), 1)
         case _ => throw new UnsupportedOperationException(
           s"1 <= input.nDimension() && input.nDimension() <= 4, 1D, 2D, 3D or 4D tensor expected " +
             s"input dimension ${input.nDimension()}")

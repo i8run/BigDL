@@ -18,8 +18,8 @@ package com.intel.analytics.bigdl.nn.mkldnn
 
 import com.intel.analytics.bigdl.mkl.{Memory, MklDnn}
 import com.intel.analytics.bigdl.nn.abstractnn.TensorModule
-import com.intel.analytics.bigdl.tensor.{MklDnnTensor, MklDnnType, Tensor}
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
+import com.intel.analytics.bigdl.tensor.{MklDnnTensor, MklDnnType, Tensor}
 
 import scala.reflect.ClassTag
 
@@ -54,7 +54,7 @@ class ReLUDnn[T: ClassTag](ip: Boolean = false, value: Float = 0.0f)(
     private var update_primitive: Boolean = true
 
     // for relu, just keep internal format same with input format
-    private var input_format = MklDnn.MemoryFormat.nchw
+    private var input_format = Memory.Format.nchw
 
 
     @transient
@@ -95,9 +95,9 @@ class ReLUDnn[T: ClassTag](ip: Boolean = false, value: Float = 0.0f)(
         }
 
         input_format = input.dim() match {
-          case 1 => MklDnn.MemoryFormat.nc
-          case 2 => MklDnn.MemoryFormat.nc
-          case 4 => MklDnn.MemoryFormat.nchw
+          case 1 => Memory.Format.nc
+          case 2 => Memory.Format.nc
+          case 4 => Memory.Format.nchw
         }
         if (input.getPrimitiveDesc() != 0L) {
           val input_pd = input.getPrimitiveDesc()

@@ -19,10 +19,10 @@ package com.intel.analytics.bigdl.nn.mkldnn
 import java.io.{IOException, ObjectInputStream, ObjectOutputStream}
 
 import com.intel.analytics.bigdl.mkl.{Memory, MklDnn}
-import com.intel.analytics.bigdl.nn.{Ones, RandomUniform, VariableFormat, Zeros}
 import com.intel.analytics.bigdl.nn.abstractnn.{Initializable, TensorModule}
-import com.intel.analytics.bigdl.tensor._
+import com.intel.analytics.bigdl.nn.{Ones, VariableFormat, Zeros}
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
+import com.intel.analytics.bigdl.tensor._
 import com.intel.analytics.bigdl.utils.{T, Table}
 
 import scala.collection.mutable.ArrayBuffer
@@ -143,10 +143,10 @@ class SpatialBatchNormalization[T: ClassTag](
 
   private def init4(tensor: Tensor[T], dataType: Int, format: Int, engine: Long): Long = {
     // TODO refactor for linear
-    val (dim, size) = if (tensor.dim() == 1 && (format == MklDnn.MemoryFormat.nc ||
-      format == MklDnn.MemoryFormat.oi)) {
+    val (dim, size) = if (tensor.dim() == 1 && (format == Memory.Format.nc ||
+      format == Memory.Format.oi)) {
       (2, Array(1) ++ tensor.size())
-    } else if (tensor.dim() == 2 && (format == MklDnn.MemoryFormat.oihw)) {
+    } else if (tensor.dim() == 2 && (format == Memory.Format.oihw)) {
       (4, tensor.size() ++ Array(1, 1))
     } else {
       (tensor.dim(), tensor.size())
@@ -190,7 +190,7 @@ class SpatialBatchNormalization[T: ClassTag](
 
   @transient var internalInput, internalOutput: MklDnnTensor[T] = _
 
-  var defaultFormat = MklDnn.MemoryFormat.nchw
+  var defaultFormat = Memory.Format.nchw
 
   private def toMklDnnTensor(t: Tensor[T]): MklDnnTensor[T] = t.asInstanceOf[MklDnnTensor[T]]
 
@@ -265,7 +265,7 @@ class SpatialBatchNormalization[T: ClassTag](
       forwardInferPrimDesc = opInferPrimDesc
 
       val dataFormat = defaultFormat
-      val paramsFormat = MklDnn.MemoryFormat.x
+      val paramsFormat = Memory.Format.x
       val dataType = MklDnn.DataType.f32
 
       inputUserPrim = initUser(input, dataType, dataFormat, engine)
@@ -460,7 +460,7 @@ class SpatialBatchNormalization[T: ClassTag](
       val primDesc = MklDnn.PrimitiveDescCreate(desc, engine, forwardTrainPrimDesc)
 
       val dataFormat = defaultFormat
-      val paramsFormat = MklDnn.MemoryFormat.x
+      val paramsFormat = Memory.Format.x
       val dataType = MklDnn.DataType.f32
 
       gradOutputUserPrim = initUser(gradOutput, dataType, dataFormat, engine)

@@ -17,7 +17,7 @@
 package com.intel.analytics.bigdl.nn.mkldnn
 
 import breeze.linalg.dim
-import com.intel.analytics.bigdl.mkl.MklDnn
+import com.intel.analytics.bigdl.mkl.{Memory, MklDnn}
 import com.intel.analytics.bigdl.nn.Graph.ModuleNode
 import com.intel.analytics.bigdl.nn.{Container, DynamicContainer, JoinTable}
 import com.intel.analytics.bigdl.nn.abstractnn.{AbstractModule, Activity}
@@ -133,9 +133,9 @@ class ConcatDnn(val dimension: Int) extends DynamicContainer[Tensor[Float], Tens
       allModelsTime += System.nanoTime() - s1
       if (i == 0) {
         default_format = currentOut.dim() match {
-          case 1 => MklDnn.MemoryFormat.x
-          case 2 => MklDnn.MemoryFormat.nc
-          case 4 => MklDnn.MemoryFormat.nchw
+          case 1 => Memory.Format.x
+          case 2 => Memory.Format.nc
+          case 4 => Memory.Format.nchw
         }
         user_format = currentOut.getFormat() match {
           case -1 => default_format

@@ -17,7 +17,7 @@
 package com.intel.analytics.bigdl.nn.mkldnn
 
 import breeze.linalg.*
-import com.intel.analytics.bigdl.mkl.MklDnn
+import com.intel.analytics.bigdl.mkl.{Memory, MklDnn}
 import com.intel.analytics.bigdl.nn.{SpatialCrossMapLRN, SpatialMaxPooling, Utils}
 import com.intel.analytics.bigdl.nn.abstractnn.{DataFormat, Initializable, TensorModule}
 import com.intel.analytics.bigdl.tensor.{MklDnnTensor, MklDnnType, Tensor}
@@ -70,7 +70,7 @@ class LRNDnn[T: ClassTag](
   var fwd : Long = 0L
 
   //
-  private var input_format = MklDnn.MemoryFormat.nchw
+  private var input_format = Memory.Format.nchw
   private val dataType = MklDnn.DataType.f32
 
   private var workSpace : MklDnnTensor[Float] = null
@@ -94,9 +94,9 @@ class LRNDnn[T: ClassTag](
 
     if (update_primitive) {
       input_format = input.dim() match {
-        case 1 => MklDnn.MemoryFormat.x
-        case 2 => MklDnn.MemoryFormat.nc
-        case 4 => MklDnn.MemoryFormat.nchw
+        case 1 => Memory.Format.x
+        case 2 => Memory.Format.nc
+        case 4 => Memory.Format.nchw
       }
       val nbatch = input.size(1)
       val input_size = input.size()

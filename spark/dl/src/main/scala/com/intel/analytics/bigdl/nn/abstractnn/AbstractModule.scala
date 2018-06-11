@@ -21,8 +21,7 @@ import java.nio.ByteOrder
 import com.intel.analytics.bigdl._
 import com.intel.analytics.bigdl.dataset.{LocalDataSet, MiniBatch, PaddingParam, Sample}
 import com.intel.analytics.bigdl.dataset.{LocalDataSet, MiniBatch, Sample}
-import com.intel.analytics.bigdl.mkl.MklDnn
-import com.intel.analytics.bigdl.mkl.MklDnn.MemoryFormat
+import com.intel.analytics.bigdl.mkl.{Memory, MklDnn}
 import com.intel.analytics.bigdl.nn.Graph.ModuleNode
 import com.intel.analytics.bigdl.nn.quantized.Quantization
 import com.intel.analytics.bigdl.nn.{Module, _}
@@ -1112,7 +1111,7 @@ abstract class AbstractModule[A <: Activity: ClassTag, B <: Activity: ClassTag, 
   }
 
   // for mkl dnn format
-  var output_format : Int = MklDnn.MemoryFormat.any
+  var output_format : Int = Memory.Format.any
 
 
   /**

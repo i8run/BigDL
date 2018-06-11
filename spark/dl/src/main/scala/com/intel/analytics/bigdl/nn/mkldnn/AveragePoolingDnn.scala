@@ -17,7 +17,7 @@
 package com.intel.analytics.bigdl.nn.mkldnn
 
 import breeze.linalg.{*, dim}
-import com.intel.analytics.bigdl.mkl.MklDnn
+import com.intel.analytics.bigdl.mkl.{Memory, MklDnn}
 import com.intel.analytics.bigdl.nn.{SpatialAveragePooling, SpatialMaxPooling, Utils}
 import com.intel.analytics.bigdl.nn.abstractnn.{DataFormat, Initializable, TensorModule}
 import com.intel.analytics.bigdl.tensor.{MklDnnTensor, MklDnnType, Tensor}
@@ -95,8 +95,8 @@ class PoolingDnnAverage[T: ClassTag](
   val stream_bwd = new ArrayBuffer[Long]
   val stream_acc = new ArrayBuffer[Long]
 
-  private val input_format = MklDnn.MemoryFormat.nchw
-  private val internal_format = MklDnn.MemoryFormat.any
+  private val input_format = Memory.Format.nchw
+  private val internal_format = Memory.Format.any
   private val dataType = MklDnn.DataType.f32
 
   private val strides = Array(dW, dH)

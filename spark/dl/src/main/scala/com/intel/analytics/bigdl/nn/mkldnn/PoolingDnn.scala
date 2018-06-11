@@ -16,11 +16,11 @@
 
 package com.intel.analytics.bigdl.nn.mkldnn
 
-import com.intel.analytics.bigdl.mkl.MklDnn
+import com.intel.analytics.bigdl.mkl.{Memory, MklDnn}
 import com.intel.analytics.bigdl.nn.Utils
 import com.intel.analytics.bigdl.nn.abstractnn.{DataFormat, Initializable, TensorModule}
-import com.intel.analytics.bigdl.tensor.{MklDnnTensor, MklDnnType, Tensor}
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
+import com.intel.analytics.bigdl.tensor.{MklDnnTensor, MklDnnType, Tensor}
 
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
@@ -94,8 +94,8 @@ class PoolingDnn[T: ClassTag](
   val stream_bwd = new ArrayBuffer[Long]
   val stream_acc = new ArrayBuffer[Long]
 
-  private val input_format = MklDnn.MemoryFormat.nchw
-  private val internal_format = MklDnn.MemoryFormat.any
+  private val input_format = Memory.Format.nchw
+  private val internal_format = Memory.Format.any
   private val dataType = MklDnn.DataType.f32
 
   private val strides = Array(dW, dH)
