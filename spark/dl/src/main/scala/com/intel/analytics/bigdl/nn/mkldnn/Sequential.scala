@@ -135,7 +135,8 @@ class Sequential[T: ClassTag](implicit ev: TensorNumeric[T])
     var result = input
     while (i < modules.length) {
       result = reorderManager.infer(
-        modules(i).asInstanceOf[MklDnnModule], modules(i + 1).asInstanceOf[MklDnnModule],
+        modules(i).asInstanceOf[MklDnnModule].outputFormats(),
+        modules(i + 1).asInstanceOf[MklDnnModule].outputFormats(),
         modules(i).forward(result)
       )
       i += 1
@@ -145,5 +146,39 @@ class Sequential[T: ClassTag](implicit ev: TensorNumeric[T])
     output
   }
 
-  override def updateGradInput(input: Activity, gradOutput: Activity): Activity = ???
+  override def updateGradInput(input: Activity, gradOutput: Activity): Activity = {
+    var i = modules.length - 1
+    var error = gradOutput
+    while (i > 0) {
+      val input = modules(i - 1).output
+      error = reorderManager.infer(
+        modules(i).asInstanceOf[MklDnnModule].gradOutputFormats()._1,
+        modules(i + 1).asInstanceOf[MklDnnModule].gradOutputFormats()._1,
+        modules(i).updateGradInput(input, error)
+      )
+      i -= 1
+    }
+    error = modules(0).updateGradInput(input, error)
+
+    this.gradInput = error
+    gradInput
+  }
+
+  override def accGradParameters(
+    input: Activity,
+    gradOutput: Activity): Unit = {
+
+    var i = modules.length - 1
+    var currentModule = modules(i)
+    var currentGradOutput = gradOutput
+    while (i > 0) {
+      val previousModule = modules(i - 1)
+      currentModule.accGradParameters(previousModule.output, currentGradOutput)
+      currentGradOutput = currentModule.gradInput
+      currentModule = previousModule
+      i -= 1
+    }
+
+    currentModule.accGradParameters(input, currentGradOutput)
+  }
 }

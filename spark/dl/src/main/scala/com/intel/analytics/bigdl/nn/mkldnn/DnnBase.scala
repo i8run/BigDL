@@ -133,19 +133,18 @@ private[mkldnn] class ReorderManager() {
     }
   }
 
-  def infer(lastModule: MklDnnModule, module: MklDnnModule, output: Activity): Activity = {
-    if (lastModule.outputFormats().length == 1) {
+  def infer(outputFormats: Array[MemoryData], inputFormats: Array[MemoryData], output: Activity)
+  : Activity = {
+    if (outputFormats.length == 1) {
       require(output.isTensor, "output activity should be a tensor")
-      inferTensor(lastModule.outputFormats()(0), module.outputFormats()(0),
-        output.asInstanceOf[Tensor[Float]])
+      inferTensor(outputFormats(0), outputFormats(0), output.asInstanceOf[Tensor[Float]])
     } else {
-      require(output.toTable.length() == lastModule.outputFormats().length,
+      require(output.toTable.length() == outputFormats.length,
         "output activity length doesn't match")
       val outputTable = T()
       var i = 0
-      while(i < lastModule.outputFormats().length) {
-        outputTable(i + 1) = inferTensor(lastModule.outputFormats()(i), module.outputFormats()(i),
-          output.toTable(i + 1))
+      while(i < outputFormats.length) {
+        outputTable(i + 1) = inferTensor(outputFormats(i), outputFormats(i), output.toTable(i + 1))
         i += 1
       }
       output
