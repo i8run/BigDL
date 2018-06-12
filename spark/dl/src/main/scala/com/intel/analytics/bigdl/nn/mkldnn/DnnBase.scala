@@ -102,21 +102,21 @@ trait MklDnnContainer extends MklDnnModule {
    * @param runtime
    */
   final def compile(phase: Phase, runtime: MklDnnRuntime): Unit = {
-    inputFormats().foreach(f => {
-      require(MemoryData.isFixed(f), "Model input layout should be fixed")
-    })
-    fusion()
+    inputFormats().foreach(f => require(f.isLayoutFixed(), "Model input layout should be fixed"))
+    fusion(phase)
     inferShape(inputFormats.map(_.shape))
     initFwdPrimitives(runtime, phase)
-    initBwdPrimitives(runtime, phase)
-    initGradWPrimitives(runtime, phase)
+    if (phase == Phase.TrainingPhase) {
+      initBwdPrimitives(runtime, phase)
+      initGradWPrimitives(runtime, phase)
+    }
     initMemory()
   }
 
   /**
    * Modify the computing path by fuse some layers into one to improve the performance
    */
-  private[mkldnn] def fusion(): Unit
+  private[mkldnn] def fusion(phase: Phase): Unit
 }
 
 private[mkldnn] class ReorderManager() {
@@ -125,7 +125,7 @@ private[mkldnn] class ReorderManager() {
   val tensorCaches = mutable.HashMap[(Long, MemoryData), Tensor[Float]]()
 
   def register(from: MemoryData, to: MemoryData, runtime: MklDnnRuntime, phase: Phase): Unit = {
-    if (needReorder(from, to)) {
+    if (needReorder(from, to) && !reorders.contains((from, to))) {
       val reorder = new ReorderMemory(from, to)
       reorder.initFwdPrimitives(runtime, phase)
       reorder.initMemory()
@@ -133,18 +133,18 @@ private[mkldnn] class ReorderManager() {
     }
   }
 
-  def infer(outputFormats: Array[MemoryData], inputFormats: Array[MemoryData], output: Activity)
+  def infer(from: Array[MemoryData], to: Array[MemoryData], output: Activity)
   : Activity = {
-    if (outputFormats.length == 1) {
+    if (from.length == 1) {
       require(output.isTensor, "output activity should be a tensor")
-      inferTensor(outputFormats(0), outputFormats(0), output.asInstanceOf[Tensor[Float]])
+      inferTensor(from(0), to(0), output.asInstanceOf[Tensor[Float]])
     } else {
-      require(output.toTable.length() == outputFormats.length,
+      require(output.toTable.length() == from.length,
         "output activity length doesn't match")
       val outputTable = T()
       var i = 0
-      while(i < outputFormats.length) {
-        outputTable(i + 1) = inferTensor(outputFormats(i), outputFormats(i), output.toTable(i + 1))
+      while(i < from.length) {
+        outputTable(i + 1) = inferTensor(from(i), to(i), output.toTable(i + 1))
         i += 1
       }
       output
@@ -154,7 +154,11 @@ private[mkldnn] class ReorderManager() {
   private def inferTensor(from: MemoryData, to : MemoryData, output: Tensor[Float])
   : Tensor[Float] = {
     //tensorCaches.getOrElse((System.identityHashCode(output), to), {
+    if (reorders.contains((from, to))) {
       reorders((from, to)).forward(output)
+    } else {
+      output
+    }
     //})
   }
 

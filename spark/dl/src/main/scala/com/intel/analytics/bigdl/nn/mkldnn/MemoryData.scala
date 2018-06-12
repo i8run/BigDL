@@ -22,6 +22,10 @@ sealed trait MemoryData {
   def layout: Int
   def setShape(shape: Array[Int]): Unit
   def setLayout(layout: Int): Unit
+
+  def isLayoutFixed(): Boolean = {
+    layout != MklDnn.MemoryFormat.format_undef && layout != MklDnn.MemoryFormat.any
+  }
 }
 
 case class HeapData(private var _shape: Array[Int], private var _layout: Int) extends MemoryData {
@@ -39,7 +43,7 @@ case class HeapData(private var _shape: Array[Int], private var _layout: Int) ex
     var hash = 1
     hash = hash * seed + this.layout
     var d = 0
-    while (d <= this.shape.length) {
+    while (d < this.shape.length) {
       hash = hash * seed + this.shape(d)
       d += 1
     }
@@ -76,6 +80,10 @@ case class HeapData(private var _shape: Array[Int], private var _layout: Int) ex
       return false
     }
   }
+
+  override def toString: String = {
+    s"HeapData([${shape.mkString("x")}], ${layout})"
+  }
 }
 
 case class NativeData(private var _shape: Array[Int], private var _layout: Int) extends MemoryData {
@@ -92,7 +100,7 @@ case class NativeData(private var _shape: Array[Int], private var _layout: Int) 
     var hash = 1
     hash = hash * seed + this.layout
     var d = 0
-    while (d <= this.shape.length) {
+    while (d < this.shape.length) {
       hash = hash * seed + this.shape(d)
       d += 1
     }
@@ -129,6 +137,10 @@ case class NativeData(private var _shape: Array[Int], private var _layout: Int) 
       return false
     }
   }
+
+  override def toString: String = {
+    s"NativeData([${shape.mkString("x")}], ${layout})"
+  }
 }
 
 private[mkldnn] object MemoryData {
@@ -137,10 +149,6 @@ private[mkldnn] object MemoryData {
     if (formats == null || formats.length == 0) return true
     formats.foreach(f => if (f.layout == MklDnn.MemoryFormat.format_undef) return false)
     return true
-  }
-
-  def isFixed(formats: MemoryData): Boolean = {
-    formats.layout == MklDnn.MemoryFormat.format_undef
   }
 
   def isSizeCompatible(actual: MemoryData, expect: MemoryData): Boolean = {

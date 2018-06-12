@@ -23,20 +23,21 @@ import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
-class Sequential[T: ClassTag](implicit ev: TensorNumeric[T])
-  extends DynamicContainer[Activity, Activity, T] with MklDnnContainer {
+class Sequential(implicit ev: TensorNumeric[Float])
+  extends DynamicContainer[Activity, Activity, Float] with MklDnnContainer {
 
   private val reorderManager = new ReorderManager()
   private var mklDnnModules : Array[MklDnnModule] = _
 
-  override def add(module: AbstractModule[_ <: Activity, _ <: Activity, T]): this.type = {
-    require(mklDnnModules != null, "You should not call add after compilation")
+  override def add(module: AbstractModule[_ <: Activity, _ <: Activity, Float]): this.type = {
+    require(mklDnnModules == null, "You should not call add after compilation")
     require(module.isInstanceOf[MklDnnModule], "layer should be MklDnnModule")
     super.add(module)
   }
 
-  override private[mkldnn] def fusion(): Unit = {
-    modules.map { case mc: MklDnnContainer => mc.fusion() }
+  override private[mkldnn] def fusion(phase: Phase): Unit = {
+    modules.filter(_.isInstanceOf[MklDnnContainer])
+      .map { case mc: MklDnnContainer => mc.fusion(phase) }
   }
 
   override private[mkldnn] def inferShape(shapes: Array[Array[Int]]) = {
@@ -128,7 +129,7 @@ class Sequential[T: ClassTag](implicit ev: TensorNumeric[T])
   override def updateOutput(input: Activity): Activity = {
     var i = 0
     var lastOutput = input
-    while (i < mklDnnModules.length) {
+    while (i < mklDnnModules.length - 1) {
       lastOutput = reorderManager.infer(
         mklDnnModules(i).outputFormats(),
         mklDnnModules(i + 1).inputFormats(),
@@ -137,7 +138,7 @@ class Sequential[T: ClassTag](implicit ev: TensorNumeric[T])
       i += 1
     }
 
-    this.output = lastOutput
+    this.output = modules(i).forward(lastOutput)
     output
   }
 

@@ -40,7 +40,7 @@ class ReorderMemory(inputFormat: MemoryData, outputFormat: MemoryData)
   }
 
   override private[mkldnn] def inferShape(shapes: Array[Array[Int]]): Array[Array[Int]] = {
-    throw new IllegalAccessException("This method should not be called")
+    Array(outputFormat.shape)
   }
 
   override private[mkldnn] def initFwdPrimitives(runtime: MklDnnRuntime, phase: Phase) = {
@@ -108,6 +108,10 @@ class ReorderMemory(inputFormat: MemoryData, outputFormat: MemoryData)
   override private[mkldnn] def outputFormats() = Array(outputFormat)
 
   override private[mkldnn] def gradOutputFormats() = (Array(outputFormat), Array(outputFormat))
+
+  override def toString(): String = {
+    s"nn.mkl.ReorderMemory(${inputFormat} -> ${outputFormat})"
+  }
 }
 
 object ReorderMemory {
