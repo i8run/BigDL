@@ -16,7 +16,7 @@
 
 package com.intel.analytics.bigdl.nn.mkldnn
 
-import com.intel.analytics.bigdl.mkl.{Memory, MklDnn}
+import com.intel.analytics.bigdl.mkl.{DataType, Memory, MklDnn}
 import com.intel.analytics.bigdl.nn.abstractnn.TensorModule
 import com.intel.analytics.bigdl.tensor.Tensor
 
@@ -55,7 +55,7 @@ class MemoryReOrderTest(inputFormat: Int = Memory.Format.any,
   val stream_fwd = new ArrayBuffer[Long]
   val stream_bwd = new ArrayBuffer[Long]
 
-  private val dataType = MklDnn.DataType.f32
+  private val dataType = DataType.F32
 
   require(outputFormat != Memory.Format.any, "output format in" +
     "MemoryReOrder should not be any")

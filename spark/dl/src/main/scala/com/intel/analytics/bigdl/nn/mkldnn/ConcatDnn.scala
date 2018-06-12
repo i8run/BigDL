@@ -17,7 +17,7 @@
 package com.intel.analytics.bigdl.nn.mkldnn
 
 import breeze.linalg.dim
-import com.intel.analytics.bigdl.mkl.{Memory, MklDnn}
+import com.intel.analytics.bigdl.mkl.{DataType, Memory, MklDnn, Query}
 import com.intel.analytics.bigdl.nn.Graph.ModuleNode
 import com.intel.analytics.bigdl.nn.{Container, DynamicContainer, JoinTable}
 import com.intel.analytics.bigdl.nn.abstractnn.{AbstractModule, Activity}
@@ -77,7 +77,7 @@ class ConcatDnn(val dimension: Int) extends DynamicContainer[Tensor[Float], Tens
   private var reorder_src_memory: Array[Long] = null
   private var reorder_dst_memory: Array[Long] = null
 
-  val dataType = MklDnn.DataType.f32
+  val dataType = DataType.F32
 
   def reorderToUser(input: Tensor[Float], output: Tensor[Float],
                     outputFormat: Int, num: Int): Unit = {
@@ -208,7 +208,7 @@ class ConcatDnn(val dimension: Int) extends DynamicContainer[Tensor[Float], Tens
         modules.length, dimension - 1, resultsMPD)
 
       // for dst memory
-      val dst_mpd = MklDnnOps.primitiveDescQueryPd(concatDesc, MklDnn.Query.dst_pd, 0)
+      val dst_mpd = MklDnnOps.primitiveDescQueryPd(concatDesc, Query.DstPd, 0)
       output.setPrimitiveDesc(dst_mpd)
       dst_memory = MklDnn.PrimitiveCreate0(dst_mpd)
 

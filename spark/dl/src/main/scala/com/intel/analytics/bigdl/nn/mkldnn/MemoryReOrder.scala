@@ -18,7 +18,7 @@ package com.intel.analytics.bigdl.nn.mkldnn
 
 import breeze.linalg
 import breeze.linalg.dim
-import com.intel.analytics.bigdl.mkl.{Memory, MklDnn}
+import com.intel.analytics.bigdl.mkl.{DataType, Memory, MklDnn}
 import com.intel.analytics.bigdl.nn.abstractnn.{DataFormat, TensorModule}
 import com.intel.analytics.bigdl.tensor.{DnnTensor, MklDnnTensor, Tensor}
 
@@ -57,7 +57,7 @@ class MemoryReOrder(inputFormat: Int = Memory.Format.any,
   val stream_fwd = new ArrayBuffer[Long]
   val stream_bwd = new ArrayBuffer[Long]
 
-  private val dataType = MklDnn.DataType.f32
+  private val dataType = DataType.F32
 
   private var internal_inputFormat = this.inputFormat
   // This helper attribute and method are for test. We can check the output at the end of seq.

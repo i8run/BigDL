@@ -16,8 +16,7 @@
 
 package com.intel.analytics.bigdl.nn.mkldnn
 
-import com.intel.analytics.bigdl.mkl.MklDnn.{EngineType, StreamType}
-import com.intel.analytics.bigdl.mkl.{Memory, MklDnn}
+import com.intel.analytics.bigdl.mkl.{DataType, Engine, Memory, MklDnn, PropKind, Stream => DnnStream}
 import com.intel.analytics.bigdl.nn
 import com.intel.analytics.bigdl.nn.abstractnn.TensorModule
 import com.intel.analytics.bigdl.tensor.Tensor
@@ -30,7 +29,7 @@ class SoftMax[T: ClassTag]()(implicit ev: TensorNumeric[T]) extends TensorModule
   var hasForwarded = false
 
   // TODO should be refactored to on module
-  val engine: Long = MklDnn.EngineCreate(EngineType.cpu, 0)
+  val engine: Long = Engine.Create(Engine.Kind.Cpu, 0)
 
   var forwardStream = 0L
 
@@ -73,16 +72,16 @@ class SoftMax[T: ClassTag]()(implicit ev: TensorNumeric[T]) extends TensorModule
             s"input dimension ${input.nDimension()}")
       }
 
-      val srcMemDesc = MklDnn.MemoryDescInit(ndim, dims, MklDnn.DataType.f32, format)
+      val srcMemDesc = MklDnn.MemoryDescInit(ndim, dims, DataType.F32, format)
 
       // TODO the axis should depend on the input dimension
       // it's always the first dim. Is it correct?
-      val opDesc = MklDnn.SoftMaxForwardDescInit(MklDnn.PropKind.forwardInference,
+      val opDesc = MklDnn.SoftMaxForwardDescInit(PropKind.ForwardInference,
         srcMemDesc, axis)
       val opPrimDesc = MklDnn.PrimitiveDescCreate(opDesc, engine, 0)
 
-      userSrcMemoryPrim = initDataMemory(ndim, dims, format, MklDnn.DataType.f32, engine, input)
-      userDstMemoryPrim = initDataMemory(ndim, dims, format, MklDnn.DataType.f32, engine, output)
+      userSrcMemoryPrim = initDataMemory(ndim, dims, format, DataType.F32, engine, input)
+      userDstMemoryPrim = initDataMemory(ndim, dims, format, DataType.F32, engine, output)
 
       val srcs = Array(userSrcMemoryPrim)
       val indexes = Array(0)
@@ -93,13 +92,13 @@ class SoftMax[T: ClassTag]()(implicit ev: TensorNumeric[T]) extends TensorModule
     }
 
     if (forwardStream == 0L) {
-      forwardStream = MklDnn.StreamCreate(StreamType.eager)
+      forwardStream = DnnStream.Create(DnnStream.Kind.Eager)
     }
 
     setHandle(input, userSrcMemoryPrim)
     setHandle(output, userDstMemoryPrim)
 
-    MklDnn.StreamSubmit(forwardStream, 1, Array(forwardPrim))
+    DnnStream.Submit(forwardStream, 1, Array(forwardPrim))
 
     releaseHandles(input, userSrcMemoryPrim)
     releaseHandles(output, userDstMemoryPrim)
