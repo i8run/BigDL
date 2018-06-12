@@ -153,9 +153,9 @@ private[mkldnn] class ReorderManager() {
 
   private def inferTensor(from: MemoryData, to : MemoryData, output: Tensor[Float])
   : Tensor[Float] = {
-    tensorCaches.getOrElse((System.identityHashCode(output), to), {
+    //tensorCaches.getOrElse((System.identityHashCode(output), to), {
       reorders((from, to)).forward(output)
-    })
+    //})
   }
 
   private def needReorder(from: MemoryData, to: MemoryData): Boolean = {

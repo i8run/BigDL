@@ -33,6 +33,49 @@ case class HeapData(private var _shape: Array[Int], private var _layout: Int) ex
   override def shape: Array[Int] = _shape.clone()
 
   override def layout: Int = _layout
+
+  override def hashCode(): Int = {
+    val seed = 37
+    var hash = 1
+    hash = hash * seed + this.layout
+    var d = 0
+    while (d <= this.shape.length) {
+      hash = hash * seed + this.shape(d)
+      d += 1
+    }
+
+    hash
+  }
+
+  override def equals(obj: scala.Any): Boolean = {
+    if (obj == null) {
+      return false
+    }
+    if (!obj.isInstanceOf[HeapData]) {
+      return false
+    }
+    val other = obj.asInstanceOf[HeapData]
+    if (this.eq(other)) {
+      return true
+    }
+    if (this.layout != other.layout) {
+      return false
+    }
+    if (this.shape == null && other.shape == null) {
+      return true
+    }
+    if (this.shape != null && other.shape != null) {
+      if (this.shape.length != other.shape.length) return false
+      var i = 0
+      while(i < this.shape.length) {
+        if (this.shape(i) != other.shape(i)) return false
+        i += 1
+      }
+      return true
+    } else {
+      return false
+    }
+  }
 }
 
 case class NativeData(private var _shape: Array[Int], private var _layout: Int) extends MemoryData {
@@ -43,6 +86,49 @@ case class NativeData(private var _shape: Array[Int], private var _layout: Int) 
   override def setShape(shape: Array[Int]): Unit = _shape = shape.clone()
 
   override def setLayout(layout: Int): Unit = _layout = layout
+
+  override def hashCode(): Int = {
+    val seed = 41
+    var hash = 1
+    hash = hash * seed + this.layout
+    var d = 0
+    while (d <= this.shape.length) {
+      hash = hash * seed + this.shape(d)
+      d += 1
+    }
+
+    hash
+  }
+
+  override def equals(obj: scala.Any): Boolean = {
+    if (obj == null) {
+      return false
+    }
+    if (!obj.isInstanceOf[NativeData]) {
+      return false
+    }
+    val other = obj.asInstanceOf[NativeData]
+    if (this.eq(other)) {
+      return true
+    }
+    if (this.layout != other.layout) {
+      return false
+    }
+    if (this.shape == null && other.shape == null) {
+      return true
+    }
+    if (this.shape != null && other.shape != null) {
+      if (this.shape.length != other.shape.length) return false
+      var i = 0
+      while(i < this.shape.length) {
+        if (this.shape(i) != other.shape(i)) return false
+        i += 1
+      }
+      return true
+    } else {
+      return false
+    }
+  }
 }
 
 private[mkldnn] object MemoryData {

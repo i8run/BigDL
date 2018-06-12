@@ -35,7 +35,7 @@ class ReorderMemory(inputFormat: MemoryData, outputFormat: MemoryData)
 
   override def updateGradInput(input: Tensor[Float], gradOutput: Tensor[Float]): Tensor[Float] = {
     MklDnnOps.streamSubmit(runtime.stream, 1, updateGradInputPrimitives, 1,
-      Array(outputPrimitives(0), inputPrimitives(0)), Array(gradOutput, gradInput))
+      Array(gradOutputPrimitives(0), gradInputPrimitives(0)), Array(gradOutput, gradInput))
     gradInput
   }
 
