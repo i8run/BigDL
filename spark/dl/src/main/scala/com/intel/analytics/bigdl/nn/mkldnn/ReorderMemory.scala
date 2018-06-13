@@ -65,12 +65,12 @@ class ReorderMemory(inputFormat: MemoryData, outputFormat: MemoryData)
   override private[mkldnn] def initBwdPrimitives(runtime: MklDnnRuntime, phase: Phase) = {
     this.runtime = runtime
     val gradInputMemDesc = MklDnn.MemoryDescInit(_inputFormat.shape.length, _inputFormat.shape,
-      MklDnn.DataType.f32, _inputFormat.layout)
+      DataType.F32, _inputFormat.layout)
     val gradInputPrimDesc = MklDnn.MemoryPrimitiveDescCreate(gradInputMemDesc, runtime.engine)
     gradInputPrimitives = Array(MklDnn.PrimitiveCreate0(gradInputPrimDesc))
 
     val gradOutputMemDesc = MklDnn.MemoryDescInit(_outputFormat.shape.length, _outputFormat.shape,
-      MklDnn.DataType.f32, _outputFormat.layout)
+      DataType.F32, _outputFormat.layout)
     val gradOutputPrimDesc = MklDnn.MemoryPrimitiveDescCreate(gradOutputMemDesc, runtime.engine)
     gradOutputPrimitives = Array(MklDnn.PrimitiveCreate0(gradOutputPrimDesc))
 
