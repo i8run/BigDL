@@ -19,11 +19,9 @@ import com.intel.analytics.bigdl.mkl.{DataType, Memory, MklDnn}
 import com.intel.analytics.bigdl.nn.abstractnn.TensorModule
 import com.intel.analytics.bigdl.tensor.{DnnTensor, Tensor}
 
-class ReorderMemory(inputFormat: MemoryData, outputFormat: MemoryData)
+class ReorderMemory(inputFormat: MemoryData, outputFormat: MemoryData,
+  gradInputFormat: MemoryData, gradOutputFormat: MemoryData)
   extends TensorModule[Float] with MklDnnLayer {
-
-  private var _inputFormat = inputFormat
-  private var _outputFormat = outputFormat
 
   override def updateOutput(input: Tensor[Float]): Tensor[Float] = {
     MklDnnOps.streamSubmit(
@@ -45,13 +43,13 @@ class ReorderMemory(inputFormat: MemoryData, outputFormat: MemoryData)
 
   override private[mkldnn] def initFwdPrimitives(runtime: MklDnnRuntime, phase: Phase) = {
     this.runtime = runtime
-    val inputMemDesc = MklDnn.MemoryDescInit(_inputFormat.shape.length, _inputFormat.shape,
-      DataType.F32, _inputFormat.layout)
+    val inputMemDesc = MklDnn.MemoryDescInit(inputFormat.shape.length, inputFormat.shape,
+      DataType.F32, inputFormat.layout)
     val inputPrimDesc = MklDnn.MemoryPrimitiveDescCreate(inputMemDesc, runtime.engine)
     inputPrimitives = Array(MklDnn.PrimitiveCreate0(inputPrimDesc))
 
-    val outputMemDesc = MklDnn.MemoryDescInit(_outputFormat.shape.length, _outputFormat.shape,
-      DataType.F32, _outputFormat.layout)
+    val outputMemDesc = MklDnn.MemoryDescInit(outputFormat.shape.length, outputFormat.shape,
+      DataType.F32, outputFormat.layout)
     val outputPrimDesc = MklDnn.MemoryPrimitiveDescCreate(outputMemDesc, runtime.engine)
     outputPrimitives = Array(MklDnn.PrimitiveCreate0(outputPrimDesc))
 
@@ -64,13 +62,13 @@ class ReorderMemory(inputFormat: MemoryData, outputFormat: MemoryData)
 
   override private[mkldnn] def initBwdPrimitives(runtime: MklDnnRuntime, phase: Phase) = {
     this.runtime = runtime
-    val gradInputMemDesc = MklDnn.MemoryDescInit(_inputFormat.shape.length, _inputFormat.shape,
-      DataType.F32, _inputFormat.layout)
+    val gradInputMemDesc = MklDnn.MemoryDescInit(gradInputFormat.shape.length,
+      gradInputFormat.shape, DataType.F32, gradInputFormat.layout)
     val gradInputPrimDesc = MklDnn.MemoryPrimitiveDescCreate(gradInputMemDesc, runtime.engine)
     gradInputPrimitives = Array(MklDnn.PrimitiveCreate0(gradInputPrimDesc))
 
-    val gradOutputMemDesc = MklDnn.MemoryDescInit(_outputFormat.shape.length, _outputFormat.shape,
-      DataType.F32, _outputFormat.layout)
+    val gradOutputMemDesc = MklDnn.MemoryDescInit(gradOutputFormat.shape.length,
+      gradOutputFormat.shape, DataType.F32, gradOutputFormat.layout)
     val gradOutputPrimDesc = MklDnn.MemoryPrimitiveDescCreate(gradOutputMemDesc, runtime.engine)
     gradOutputPrimitives = Array(MklDnn.PrimitiveCreate0(gradOutputPrimDesc))
 
@@ -85,14 +83,14 @@ class ReorderMemory(inputFormat: MemoryData, outputFormat: MemoryData)
   override private[mkldnn] def initGradWPrimitives(runtime: MklDnnRuntime, phase: Phase) = {}
 
   override private[mkldnn] def initMemory() = {
-    _inputFormat match {
+    gradInputFormat match {
       case d: NativeData =>
         gradInput = DnnTensor[Float](d.shape)
       case d: HeapData =>
         gradInput = Tensor[Float](d.shape)
       case _ => throw new UnsupportedOperationException("memory format is not supported")
     }
-    _outputFormat match {
+    outputFormat match {
       case d: NativeData =>
         output = DnnTensor[Float](d.shape)
       case d: HeapData =>
@@ -103,11 +101,12 @@ class ReorderMemory(inputFormat: MemoryData, outputFormat: MemoryData)
 
   override private[mkldnn] def inputFormats() = Array(inputFormat)
 
-  override private[mkldnn] def gradInputFormats() = Array(inputFormat)
+  override private[mkldnn] def gradInputFormats() = Array(gradInputFormat)
 
   override private[mkldnn] def outputFormats() = Array(outputFormat)
 
-  override private[mkldnn] def gradOutputFormats() = (Array(outputFormat), Array(outputFormat))
+  override private[mkldnn] def gradOutputFormats() = (Array(gradOutputFormat),
+    Array(gradOutputFormat))
 
   override def toString(): String = {
     s"nn.mkl.ReorderMemory(${inputFormat} -> ${outputFormat})"
@@ -116,6 +115,12 @@ class ReorderMemory(inputFormat: MemoryData, outputFormat: MemoryData)
 
 object ReorderMemory {
   def apply(inputFormat: MemoryData, outputFormat: MemoryData): ReorderMemory = {
-    new ReorderMemory(inputFormat, outputFormat)
+    new ReorderMemory(inputFormat, outputFormat,
+      inputFormat.cloneFormat(), outputFormat.cloneFormat())
+  }
+
+  def apply(inputFormat: MemoryData, outputFormat: MemoryData, gradInputFormat: MemoryData,
+    gradOutputFormat: MemoryData): ReorderMemory = {
+    new ReorderMemory(inputFormat, outputFormat, gradInputFormat, gradOutputFormat)
   }
 }

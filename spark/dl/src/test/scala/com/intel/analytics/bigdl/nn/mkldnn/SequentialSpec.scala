@@ -15,15 +15,15 @@
  */
 package com.intel.analytics.bigdl.nn.mkldnn
 
-import com.intel.analytics.bigdl.mkl.Memory
+import com.intel.analytics.bigdl.mkl.MklDnn
 import com.intel.analytics.bigdl.tensor.Tensor
 import com.intel.analytics.bigdl.utils.BigDLSpecHelper
 
 class SequentialSpec extends BigDLSpecHelper {
   "Sequential" should "not be called add after compilation" in {
-    val layer = new ReorderMemory(new HeapData(Array(3, 4), Memory.Format.nc),
+    val layer = ReorderMemory(new HeapData(Array(3, 4), Memory.Format.nc),
       new NativeData(Array(3, 4), Memory.Format.nc))
-    val layer2 = new ReorderMemory(new HeapData(Array(3, 4), Memory.Format.nc),
+    val layer2 = ReorderMemory(new HeapData(Array(3, 4), Memory.Format.nc),
       new NativeData(Array(3, 4), Memory.Format.nc))
     val seq = new Sequential()
     seq.add(layer)
@@ -34,11 +34,11 @@ class SequentialSpec extends BigDLSpecHelper {
   }
 
   "Sequential" should "be correct when no memory reorder happened" in {
-    val layer1 = new ReorderMemory(new HeapData(Array(3, 4), Memory.Format.nc),
+    val layer1 = ReorderMemory(new HeapData(Array(3, 4), Memory.Format.nc),
       new NativeData(Array(3, 4), Memory.Format.nc))
-    val layer2 = new ReorderMemory(new NativeData(Array(3, 4), Memory.Format.nc),
+    val layer2 = ReorderMemory(new NativeData(Array(3, 4), Memory.Format.nc),
       new NativeData(Array(3, 4), Memory.Format.io))
-    val layer3 = new ReorderMemory(new NativeData(Array(3, 4), Memory.Format.io),
+    val layer3 = ReorderMemory(new NativeData(Array(3, 4), Memory.Format.io),
       new HeapData(Array(3, 4), Memory.Format.nc))
     val seq = new Sequential()
     seq.add(layer1)
@@ -62,11 +62,11 @@ class SequentialSpec extends BigDLSpecHelper {
   }
 
   "Sequential" should "be correct when auto add memory reorder" in {
-    val layer1 = new ReorderMemory(new HeapData(Array(3, 4), Memory.Format.nc),
+    val layer1 = ReorderMemory(new HeapData(Array(3, 4), Memory.Format.nc),
       new HeapData(Array(3, 4), Memory.Format.nc))
-    val layer2 = new ReorderMemory(new NativeData(Array(3, 4), Memory.Format.nc),
+    val layer2 = ReorderMemory(new NativeData(Array(3, 4), Memory.Format.nc),
       new NativeData(Array(3, 4), Memory.Format.io))
-    val layer3 = new ReorderMemory(new HeapData(Array(3, 4), Memory.Format.nc),
+    val layer3 = ReorderMemory(new HeapData(Array(3, 4), Memory.Format.nc),
       new HeapData(Array(3, 4), Memory.Format.nc))
     val seq = new Sequential()
     seq.add(layer1)

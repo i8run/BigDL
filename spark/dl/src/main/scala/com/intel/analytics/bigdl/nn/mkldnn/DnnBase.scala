@@ -15,7 +15,8 @@
  */
 package com.intel.analytics.bigdl.nn.mkldnn
 
-import com.intel.analytics.bigdl.nn.abstractnn.Activity
+import com.intel.analytics.bigdl.nn.DynamicContainer
+import com.intel.analytics.bigdl.nn.abstractnn.{AbstractModule, Activity}
 import com.intel.analytics.bigdl.tensor.Tensor
 import com.intel.analytics.bigdl.utils.T
 
@@ -85,7 +86,15 @@ trait MklDnnLayer extends MklDnnModule {
 /**
  * Helper utilities when integrating containers with MKL-DNN
  */
-trait MklDnnContainer extends MklDnnModule {
+trait MklDnnContainer extends DynamicContainer[Activity, Activity, Float] with MklDnnModule {
+  protected val reorderManager = new ReorderManager()
+  protected var mklDnnModules : Array[MklDnnModule] = _
+
+  override def add(module: AbstractModule[_ <: Activity, _ <: Activity, Float]): this.type = {
+    require(mklDnnModules == null, "You should not call add after compilation")
+    require(module.isInstanceOf[MklDnnModule], "layer should be MklDnnModule")
+    super.add(module)
+  }
 
   /**
    * Create MklDnnRuntime and compile the model
@@ -102,6 +111,7 @@ trait MklDnnContainer extends MklDnnModule {
    * @param runtime
    */
   final def compile(phase: Phase, runtime: MklDnnRuntime): Unit = {
+    freeze()
     inputFormats().foreach(f => require(f.isLayoutFixed(), "Model input layout should be fixed"))
     fusion(phase)
     inferShape(inputFormats.map(_.shape))
@@ -116,20 +126,45 @@ trait MklDnnContainer extends MklDnnModule {
   /**
    * Modify the computing path by fuse some layers into one to improve the performance
    */
-  private[mkldnn] def fusion(phase: Phase): Unit
+  private[mkldnn] def fusion(phase: Phase): Unit = {
+    modules.filter(_.isInstanceOf[MklDnnContainer])
+      .map { case mc: MklDnnContainer => mc.fusion(phase) }
+  }
+
+  private def freeze(): Unit = {
+    if (mklDnnModules == null) {
+      mklDnnModules = modules.map(_.asInstanceOf[MklDnnModule]).toArray
+    }
+    modules.filter(_.isInstanceOf[MklDnnContainer])
+      .map { case mc: MklDnnContainer => mc.freeze() }
+  }
+
+  override private[mkldnn] def initMemory() = {
+    modules.foreach { case m: MklDnnModule => m.initMemory() }
+  }
 }
 
 private[mkldnn] class ReorderManager() {
-
-  val reorders = mutable.HashMap[(MemoryData, MemoryData), ReorderMemory]()
-  val tensorCaches = mutable.HashMap[(Long, MemoryData), Tensor[Float]]()
+  // (MemoryFormatId, TargetFormat) -> Reorder
+  val reorders = mutable.HashMap[(Int, MemoryData), ReorderMemory]()
+  // ReorderId -> RefCount
+  val refCounts = mutable.HashMap[Int, Int]()
+  val useCounts = mutable.HashMap[Int, Int]()
 
   def register(from: MemoryData, to: MemoryData, runtime: MklDnnRuntime, phase: Phase): Unit = {
-    if (needReorder(from, to) && !reorders.contains((from, to))) {
-      val reorder = new ReorderMemory(from, to)
-      reorder.initFwdPrimitives(runtime, phase)
-      reorder.initMemory()
-      reorders((from, to)) = reorder
+    val mId = System.identityHashCode(from)
+    if (needReorder(from, to)) {
+      if (reorders.contains((mId, to))) {
+        refCounts(System.identityHashCode(reorders((mId, to)))) += 1
+      } else {
+        val reorder = ReorderMemory(from, to)
+        reorder.initFwdPrimitives(runtime, phase)
+        reorder.initMemory()
+        reorders((mId, to)) = reorder
+        val reorderId = System.identityHashCode(reorder)
+        refCounts(reorderId) = 1
+        useCounts(reorderId) = 0
+      }
     }
   }
 
@@ -153,13 +188,23 @@ private[mkldnn] class ReorderManager() {
 
   private def inferTensor(from: MemoryData, to : MemoryData, output: Tensor[Float])
   : Tensor[Float] = {
-    //tensorCaches.getOrElse((System.identityHashCode(output), to), {
-    if (reorders.contains((from, to))) {
-      reorders((from, to)).forward(output)
+    val mId = System.identityHashCode(from)
+    if (reorders.contains((mId, to))) {
+      val reorder = reorders((mId, to))
+      val reorderId = System.identityHashCode(reorder)
+      val result = if (useCounts(reorderId) == 0) {
+        reorder.forward(output)
+      } else {
+        reorder.output
+      }
+      useCounts(reorderId) += 1
+      if (useCounts(reorderId) == refCounts(reorderId)) {
+        useCounts(reorderId) = 0
+      }
+      result
     } else {
       output
     }
-    //})
   }
 
   private def needReorder(from: MemoryData, to: MemoryData): Boolean = {
