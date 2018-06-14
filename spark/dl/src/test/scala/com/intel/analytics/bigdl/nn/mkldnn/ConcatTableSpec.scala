@@ -15,17 +15,17 @@
  */
 package com.intel.analytics.bigdl.nn.mkldnn
 
-import com.intel.analytics.bigdl.mkl.MklDnn
+import com.intel.analytics.bigdl.mkl.Memory
 import com.intel.analytics.bigdl.tensor.Tensor
 import com.intel.analytics.bigdl.utils.{BigDLSpecHelper, T}
 
 class ConcatTableSpec extends BigDLSpecHelper {
   "ConcatTable" should "throw exception when input format is different" in {
     val container = ConcatTable()
-    container.add(ReorderMemory(HeapData(Array(1, 2, 3, 4), MklDnn.MemoryFormat.nchw),
-      HeapData(Array(1, 2, 3, 4), MklDnn.MemoryFormat.nchw)))
-    container.add(ReorderMemory(NativeData(Array(1, 2, 3, 4), MklDnn.MemoryFormat.nchw),
-      HeapData(Array(1, 2, 3, 4), MklDnn.MemoryFormat.nchw)))
+    container.add(ReorderMemory(HeapData(Array(1, 2, 3, 4), Memory.Format.nchw),
+      HeapData(Array(1, 2, 3, 4), Memory.Format.nchw)))
+    container.add(ReorderMemory(NativeData(Array(1, 2, 3, 4), Memory.Format.nchw),
+      HeapData(Array(1, 2, 3, 4), Memory.Format.nchw)))
 
     intercept[IllegalArgumentException] {
       container.compile(Phase.TrainingPhase)
@@ -34,10 +34,10 @@ class ConcatTableSpec extends BigDLSpecHelper {
 
   "ConcatTable" should "throw exception when input layout is different" in {
     val container = ConcatTable()
-    container.add(ReorderMemory(HeapData(Array(1, 2, 3, 4), MklDnn.MemoryFormat.nchw),
-      HeapData(Array(1, 2, 3, 4), MklDnn.MemoryFormat.nchw)))
-    container.add(ReorderMemory(HeapData(Array(1, 2, 3, 4), MklDnn.MemoryFormat.nhwc),
-      HeapData(Array(1, 2, 3, 4), MklDnn.MemoryFormat.nchw)))
+    container.add(ReorderMemory(HeapData(Array(1, 2, 3, 4), Memory.Format.nchw),
+      HeapData(Array(1, 2, 3, 4), Memory.Format.nchw)))
+    container.add(ReorderMemory(HeapData(Array(1, 2, 3, 4), Memory.Format.nhwc),
+      HeapData(Array(1, 2, 3, 4), Memory.Format.nchw)))
 
     intercept[IllegalArgumentException] {
       container.compile(Phase.TrainingPhase)
@@ -46,10 +46,10 @@ class ConcatTableSpec extends BigDLSpecHelper {
 
   "ConcatTable" should "throw exception when input shape is different" in {
     val container = ConcatTable()
-    container.add(ReorderMemory(HeapData(Array(1, 2, 3, 4), MklDnn.MemoryFormat.nchw),
-      HeapData(Array(1, 2, 3, 4), MklDnn.MemoryFormat.nchw)))
-    container.add(ReorderMemory(HeapData(Array(2, 2, 3, 4), MklDnn.MemoryFormat.nchw),
-      HeapData(Array(2, 2, 3, 4), MklDnn.MemoryFormat.nchw)))
+    container.add(ReorderMemory(HeapData(Array(1, 2, 3, 4), Memory.Format.nchw),
+      HeapData(Array(1, 2, 3, 4), Memory.Format.nchw)))
+    container.add(ReorderMemory(HeapData(Array(2, 2, 3, 4), Memory.Format.nchw),
+      HeapData(Array(2, 2, 3, 4), Memory.Format.nchw)))
 
     intercept[IllegalArgumentException] {
       container.compile(Phase.TrainingPhase)
@@ -58,15 +58,15 @@ class ConcatTableSpec extends BigDLSpecHelper {
 
   "ConcatTable" should "be good" in {
     val container = ConcatTable()
-    container.add(ReorderMemory(HeapData(Array(3, 4), MklDnn.MemoryFormat.nc),
-      HeapData(Array(3, 4), MklDnn.MemoryFormat.nc)))
+    container.add(ReorderMemory(HeapData(Array(3, 4), Memory.Format.nc),
+      HeapData(Array(3, 4), Memory.Format.nc)))
     val subcontainer = Sequential()
-    subcontainer.add(ReorderMemory(HeapData(Array(3, 4), MklDnn.MemoryFormat.nc),
-      NativeData(Array(3, 4), MklDnn.MemoryFormat.nc)))
-    subcontainer.add(ReorderMemory(NativeData(Array(3, 4), MklDnn.MemoryFormat.nc),
-      NativeData(Array(3, 4), MklDnn.MemoryFormat.io)))
-    subcontainer.add(ReorderMemory(NativeData(Array(3, 4), MklDnn.MemoryFormat.io),
-      HeapData(Array(3, 4), MklDnn.MemoryFormat.nc)))
+    subcontainer.add(ReorderMemory(HeapData(Array(3, 4), Memory.Format.nc),
+      NativeData(Array(3, 4), Memory.Format.nc)))
+    subcontainer.add(ReorderMemory(NativeData(Array(3, 4), Memory.Format.nc),
+      NativeData(Array(3, 4), Memory.Format.io)))
+    subcontainer.add(ReorderMemory(NativeData(Array(3, 4), Memory.Format.io),
+      HeapData(Array(3, 4), Memory.Format.nc)))
     container.add(subcontainer)
 
     container.compile(Phase.TrainingPhase)
