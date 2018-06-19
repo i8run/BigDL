@@ -75,6 +75,8 @@ class SequentialSpec extends BigDLSpecHelper {
     seq.compile(Phase.TrainingPhase)
     val input1 = Tensor[Float](3, 4).rand()
     val input2 = Tensor[Float](3, 4).rand()
+    println(s"Input1 is $input1")
+    println(s"Input2 is $input2")
     val output1 = seq.forward(input1)
     output1 should be(input1)
     val output2 = seq.forward(input2)
