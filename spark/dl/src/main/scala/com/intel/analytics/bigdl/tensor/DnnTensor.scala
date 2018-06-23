@@ -23,8 +23,10 @@ import com.intel.analytics.bigdl.utils.Table
 import org.apache.spark.mllib.linalg
 import org.apache.spark.mllib.linalg.Matrix
 
+import scala.annotation.strictfp
 import scala.reflect.ClassTag
 
+@strictfp
 class DnnTensor[T: ClassTag](
   private var _storage: DnnStorage[T],
   private var sizes: Array[Int]
@@ -82,6 +84,21 @@ class DnnTensor[T: ClassTag](
     Memory.SAdd(this.nElement(), this._storage.ptr.address, 0,
       x.asInstanceOf[DnnTensor[T]]._storage.ptr.address, 0, this._storage.ptr.address, 0)
     this
+  }
+
+  override def zero(): Tensor[T] = {
+    Memory.Zero(this._storage.ptr.address, this.nElement(), DnnStorage.FLOAT_BYTES)
+    this
+  }
+
+  def axpby(a: Float, b: Float, to: DnnTensor[T]): Unit = {
+    val x = this._storage.ptr.address
+    val y = to._storage.ptr.address
+    Memory.Axpby(this.nElement(), a, x, b, y)
+  }
+
+  override def toTensor[D](implicit ev: TensorNumeric[D]): DnnTensor[D] = {
+    this.asInstanceOf[DnnTensor[D]]
   }
 
   override def size(): Array[Int] = sizes.clone()
