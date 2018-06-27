@@ -21,7 +21,8 @@ import com.intel.analytics.bigdl.tensor.Tensor
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
 import com.intel.analytics.bigdl.utils.Engine
 import com.intel.analytics.bigdl.utils.serializer._
-import serialization.Bigdl.{AttrValue, BigDLModule}
+import com.intel.analytics.bigdl.utils.serializer.converters.DataConverter
+import com.intel.analytics.bigdl.serialization.Bigdl.{AttrValue, BigDLModule}
 
 import scala.reflect._
 import scala.reflect.runtime.universe
@@ -97,7 +98,7 @@ class SpatialMaxPooling[T: ClassTag](
     val inputHeight = input.size(dimh)
     val inputWidth = input.size(dimw)
 
-    val (padTop, _, padLeft, _, oHeight, oWidth) =
+    val sizes =
       if (padW == -1 && padH == -1) {
         // no ceil/floor mode in SAME padding
         Utils.getSAMEOutSizeAndPadding(inputHeight, inputWidth, dH, dW, kH, kW)
@@ -111,6 +112,17 @@ class SpatialMaxPooling[T: ClassTag](
           s"kernel size($kW, $kH)")
         Utils.getOutSizeAndPadding(inputHeight, inputWidth, dH, dW, kH, kW, padH, padW, ceilMode)
       }
+
+    val padTop = sizes(0)
+    val padBottom = sizes(1)
+    val padLeft = sizes(2)
+    val padRight = sizes(3)
+    val oHeight = sizes(4)
+    val oWidth = sizes(5)
+
+    if (ceilMode && padW == 0 && (inputWidth - kW) % dW == 0) {
+      ceilMode = false // The ceil mode is not needed.
+    }
 
     if (input.dim() == 3) {
       format match {

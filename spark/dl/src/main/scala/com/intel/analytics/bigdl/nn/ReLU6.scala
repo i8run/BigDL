@@ -30,7 +30,8 @@ import scala.reflect.ClassTag
 
 @SerialVersionUID(8169462538025916360L)
 class ReLU6[T: ClassTag](inplace: Boolean = false)
-  (implicit ev: TensorNumeric[T]) extends HardTanh[T](0, 6, inplace) {
+  (implicit ev: TensorNumeric[T])
+  extends HardTanh[T](0, 6, inplace) {
 
   override def updateOutput(input: Tensor[T]): Tensor[T] = {
     super.updateOutput(input)
@@ -50,7 +51,8 @@ class ReLU6[T: ClassTag](inplace: Boolean = false)
 
 object ReLU6 {
   def apply[@specialized(Float, Double) T: ClassTag](
-      inplace: Boolean = false)(implicit ev: TensorNumeric[T]) : ReLU6[T] = {
+      inplace: Boolean = false)
+      (implicit ev: TensorNumeric[T]): ReLU6[T] = {
     new ReLU6[T]()
   }
 }

@@ -15,7 +15,7 @@
  */
 package com.intel.analytics.bigdl.nn
 
-import com.intel.analytics.bigdl.nn.abstractnn.TensorModule
+import com.intel.analytics.bigdl.nn.abstractnn.{IdentityOutputShape, TensorModule}
 import com.intel.analytics.bigdl.tensor.{DenseTensorApply, Tensor, TensorFunc6}
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
 
@@ -31,7 +31,9 @@ import scala.reflect.ClassTag
 class ELU[T: ClassTag](
   val alpha: Double = 1.0,
   val inplace: Boolean = false)(
-  implicit ev: TensorNumeric[T]) extends TensorModule[T]  {
+  implicit ev: TensorNumeric[T])
+  extends TensorModule[T] {
+
   val _alpha = ev.fromType[Double](alpha)
 
   // Todo: Improve the performance of contiguous tensor
@@ -99,7 +101,8 @@ class ELU[T: ClassTag](
 object ELU {
   def apply[@specialized(Float, Double) T: ClassTag](
       alpha: Double = 1.0,
-      inplace: Boolean = false)(implicit ev: TensorNumeric[T]) : ELU[T] = {
+      inplace: Boolean = false)
+      (implicit ev: TensorNumeric[T]) : ELU[T] = {
     new ELU[T](alpha, inplace)
   }
 }

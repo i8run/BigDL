@@ -22,12 +22,13 @@ import com.intel.analytics.bigdl.nn.ErrorInfo
 import com.intel.analytics.bigdl.nn.abstractnn.{DataFormat, Initializable}
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
 import com.intel.analytics.bigdl.tensor._
-import com.intel.analytics.bigdl.utils.serializer.{DataConverter, DeserializeContext, ModuleData, SerializeContext}
+import com.intel.analytics.bigdl.utils.serializer.converters.DataConverter
+import com.intel.analytics.bigdl.utils.serializer.{DeserializeContext, ModuleData, SerializeContext}
 import com.intel.analytics.bigdl.utils.{T, Table}
 
 import scala.reflect.runtime.universe
 import scala.reflect.ClassTag
-import serialization.Bigdl.{AttrValue, BigDLModule}
+import com.intel.analytics.bigdl.serialization.Bigdl.{AttrValue, BigDLModule}
 
 @SerialVersionUID(- 8008252944905538960L)
 private[bigdl] class SpatialConvolution[T: ClassTag](
@@ -46,7 +47,6 @@ private[bigdl] class SpatialConvolution[T: ClassTag](
   require(nInputPlane % nGroup == 0, "Number of input channels should be multiples of group.")
   require(nOutputPlane % nGroup == 0, "Number of output channels should be multiples of group.")
 
-  var weight: Array[Tensor[T]] = null
   private val data: QuantizedTensor[T] = QuantizedDummyTensor[T]()
   val bias: Tensor[T] = Tensor[T](nOutputPlane)
 
@@ -54,6 +54,18 @@ private[bigdl] class SpatialConvolution[T: ClassTag](
     BigQuant.NCHW
   } else {
     BigQuant.NHWC
+  }
+
+  val params = ConvWeightParams(nOutputPlane / nGroup, nInputPlane / nGroup, kernelH, kernelW,
+    quantFormat)
+
+  val weight: Array[Tensor[T]] = {
+    val array = new Array[Tensor[T]](nGroup)
+    for (i <- 0 until nGroup) {
+      array(i) = QuantizedTensor[T](Tensor[T](Array(nGroup, kernelH, kernelW, nInputPlane / nGroup,
+        nOutputPlane / nGroup)), params)
+    }
+    array
   }
 
   val dilationHeight = 1
@@ -77,13 +89,11 @@ private[bigdl] class SpatialConvolution[T: ClassTag](
         kernelH, kernelW))
     }
 
-    weight = new Array[Tensor[T]](nGroup)
-    val params = ConvWeightParams(nOutputPlane / nGroup, nInputPlane / nGroup, kernelH, kernelW,
-      quantFormat)
     for (i <- 1 to nGroup) {
       val groupWeight = weightTmp.select(1, i)
       ev.getType() match {
         case FloatType =>
+          weight(i - 1).asInstanceOf[QuantizedTensor[T]].release()
           weight(i - 1) = QuantizedTensor[T](groupWeight, params)
         case _ => throw new UnsupportedOperationException(s"Only support Float for quantized model")
       }
@@ -104,7 +114,7 @@ private[bigdl] class SpatialConvolution[T: ClassTag](
     val inputWidth = input.size(dimWidth)
     val inputHeight = input.size(dimHeight)
 
-    val (padTop, padBottom, padLeft, padRight, outputHeight, outputWidth) =
+    val sizes =
       if (padW == -1 && padH == -1) {
         nn.Utils.getSAMEOutSizeAndPadding(inputHeight, inputWidth, strideH, strideW, kernelH,
           kernelW)
@@ -113,6 +123,13 @@ private[bigdl] class SpatialConvolution[T: ClassTag](
           kernelH, kernelW, padH, padW, ceilMode = false, dilationWidth = dilationWidth,
           dilationHeight = dilationHeight)
       }
+
+    val padTop = sizes(0)
+    val padBottom = sizes(1)
+    val padLeft = sizes(2)
+    val padRight = sizes(3)
+    val outputHeight = sizes(4)
+    val outputWidth = sizes(5)
 
     val batchSize = if (input.dim() == 3) {
       output.resize(nn.Utils.getOutputShape(outputHeight, outputWidth, nOutputPlane,
@@ -201,10 +218,6 @@ private[bigdl] class SpatialConvolution[T: ClassTag](
     (weight :+ bias, Array.fill[Tensor[T]](nGroup + 1)(empty)) // nGroup's weight + bias
   }
 
-  override def getParametersTable(): Table = {
-    T(getName() -> T("weight" -> weight, "bias" -> bias))
-  }
-
   override def equals(obj: Any): Boolean = {
     if (!super.equals(obj)) {
       return false
@@ -257,7 +270,7 @@ private[bigdl] class SpatialConvolution[T: ClassTag](
       s" $kernelH, $strideW, $strideH, $padW, $padH, $nGroup)"
   }
 
-  def release(): Unit = {
+  override def release(): Unit = {
     weight.foreach(_.asInstanceOf[QuantizedTensor[T]].release())
     data.release()
   }
@@ -301,8 +314,12 @@ object SpatialConvolution extends QuantSerializer {
     moduleData: ModuleData[T])(implicit ev: TensorNumeric[T]): Unit = {
     val conv = moduleData.module.asInstanceOf[SpatialConvolution[T]]
     val attrMap = context.bigdlModule.getAttrMap
-    conv.weight = DataConverter.getAttributeValue(context, attrMap.get("weights"))
+    val weights = DataConverter.getAttributeValue(context, attrMap.get("weights"))
       .asInstanceOf[Array[Tensor[T]]]
+    for (i <- 0 until conv.weight.length) {
+      conv.weight(i).asInstanceOf[QuantizedTensor[T]].release()
+      conv.weight(i).set(weights(i))
+    }
   }
 }
 

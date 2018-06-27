@@ -16,7 +16,7 @@
 
 package com.intel.analytics.bigdl.nn
 
-import com.intel.analytics.bigdl.nn.abstractnn.TensorModule
+import com.intel.analytics.bigdl.nn.abstractnn.{IdentityOutputShape, TensorModule}
 import com.intel.analytics.bigdl.tensor.Tensor
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
 
@@ -28,8 +28,8 @@ import scala.reflect.ClassTag
  * Sigmoid is defined as: f(x) = 1 / (1 + exp(-x))
  */
 @SerialVersionUID(6855417348268610044L)
-class Sigmoid[@specialized(Float, Double) T: ClassTag](
-  implicit ev: TensorNumeric[T]) extends TensorModule[T]  {
+class Sigmoid[T: ClassTag](
+  implicit ev: TensorNumeric[T]) extends TensorModule[T] {
 
   private val buffer: Tensor[T] = Tensor[T]()
 
@@ -43,8 +43,15 @@ class Sigmoid[@specialized(Float, Double) T: ClassTag](
   }
 
   override def updateGradInput(input: Tensor[T], gradOutput: Tensor[T]): Tensor[T] = {
-    gradInput.resizeAs(input).copy(gradOutput)
-    gradInput.cmul(output).cmul(buffer.add(ev.fromType(-1))).cmul(output)
+    updateGradInputInternal(output, gradOutput)
+  }
+
+  private[bigdl] def updateGradInputInternal(output: Tensor[T],
+                                             gradOutput: Tensor[T]): Tensor[T] = {
+    gradInput.resizeAs(gradOutput).copy(gradOutput)
+    buffer.resizeAs(gradOutput)
+    buffer.fill(ev.one).sub(output)
+    gradInput.cmul(output).cmul(buffer)
     gradInput
   }
 

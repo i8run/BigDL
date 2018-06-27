@@ -171,9 +171,10 @@ optimizer = Optimizer(
 ## RMSprop ##
 
 An implementation of RMSprop (Reference: http://arxiv.org/pdf/1308.0850v5.pdf, Sec 4.2)
+
 * learningRate : learning rate
-* learningRateDecaye : learning rate decay
-* decayRatee : decayRate, also called rho
+* learningRateDecay : learning rate decay
+* decayRate : decayRate, also called rho
 * Epsilone : for numerical stability
 
 ## Adamax ##
@@ -251,6 +252,7 @@ x after optimize: 0.27779138
 [com.intel.analytics.bigdl.tensor.DenseTensor$mcF$sp of size 2]
 ```
 
+## LBFGS ##
 
 **Scala:**
 ```scala
@@ -276,13 +278,14 @@ large-scale stochastic problems, where opfunc is a noisy approximation of f(x). 
 case, the learning rate allows a reduction of confidence in the step size.
 
 **Parameters:**
-* **maxIter** - Maximum number of iterations allowed. Default: 20
-* **maxEval** - Maximum number of function evaluations. Default: Double.MaxValue
-* **tolFun** - Termination tolerance on the first-order optimality. Default: 1e-5
-* **tolX** - Termination tol on progress in terms of func/param changes. Default: 1e-9
-* **learningRate** - the learning rate. Default: 1.0
-* **lineSearch** - A line search function. Default: None
-* **lineSearchOptions** - If no line search provided, then a fixed step size is used. Default: None
+
+* maxIter - Maximum number of iterations allowed. Default: 20
+* maxEval - Maximum number of function evaluations. Default: Double.MaxValue
+* tolFun - Termination tolerance on the first-order optimality. Default: 1e-5
+* tolX - Termination tol on progress in terms of func/param changes. Default: 1e-9
+* learningRate - the learning rate. Default: 1.0
+* lineSearch - A line search function. Default: None
+* lineSearchOptions - If no line search provided, then a fixed step size is used. Default: None
 
 **Scala example:**
 ```scala
@@ -307,4 +310,53 @@ optimizer = Optimizer(
     batch_size=32)
 ```
 
+## Ftrl ##
 
+**Scala:**
+```scala
+val optimMethod = new Ftrl(
+  learningRate = 1e-3, learningRatePower = -0.5,
+  initialAccumulatorValue = 0.1, l1RegularizationStrength = 0.0,
+  l2RegularizationStrength = 0.0, l2ShrinkageRegularizationStrength = 0.0)
+```
+
+**Python:**
+```python
+optim_method = Ftrl(learningrate = 1e-3, learningrate_power = -0.5, \
+                 initial_accumulator_value = 0.1, l1_regularization_strength = 0.0, \
+                 l2_regularization_strength = 0.0, l2_shrinkage_regularization_strength = 0.0)
+```
+
+An implementation of (Ftrl)[https://www.eecs.tufts.edu/~dsculley/papers/ad-click-prediction.pdf.]
+Support L1 penalty, L2 penalty and shrinkage-type L2 penalty.
+
+**Parameters:**
+
+* learningRate: learning rate
+* learningRatePower: double, must be less or equal to zero. Default is -0.5.
+* initialAccumulatorValue: double, the starting value for accumulators, require zero or positive values. Default is 0.1.
+* l1RegularizationStrength: double, must be greater or equal to zero. Default is zero.
+* l2RegularizationStrength: double, must be greater or equal to zero. Default is zero.
+* l2ShrinkageRegularizationStrength: double, must be greater or equal to zero. Default is zero. This differs from l2RegularizationStrength above. L2 above is a stabilization penalty, whereas this one is a magnitude penalty.
+
+**Scala example:**
+```scala
+val optimMethod = new Ftrl(learningRate = 5e-3, learningRatePower = -0.5,
+  initialAccumulatorValue = 0.01)
+optimizer.setOptimMethod(optimMethod)
+```
+
+**Python example:**
+```python
+optim_method = Ftrl(learningrate = 5e-3, \
+    learningrate_power = -0.5, \
+    initial_accumulator_value = 0.01)
+                  
+optimizer = Optimizer(
+    model=mlp_model,
+    training_rdd=train_data,
+    criterion=ClassNLLCriterion(),
+    optim_method=optim_method,
+    end_trigger=MaxEpoch(20),
+    batch_size=32)
+```

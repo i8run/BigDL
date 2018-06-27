@@ -72,10 +72,13 @@ abstract class Sample[T: ClassTag] extends Serializable {
    * a default implement to throw exception.
    * @return feature tensor
    */
-  @deprecated("Old interface", "0.2.0")
-  def feature()(implicit ev: TensorNumeric[T]): Tensor[T] = {
-    throw new UnsupportedOperationException("Sample.feature(): unimplemented deprecated method")
-  }
+  def feature()(implicit ev: TensorNumeric[T]): Tensor[T]
+
+  /**
+   * Get feature tensor for given index
+   * @param index index of specific sample
+   */
+  def feature(index: Int)(implicit ev: TensorNumeric[T]): Tensor[T]
 
   /**
    * Get label tensor, for one label Sample only.
@@ -83,10 +86,13 @@ abstract class Sample[T: ClassTag] extends Serializable {
    * a default implement to throw exception.
    * @return label tensor
    */
-  @deprecated("Old interface", "0.2.0")
-  def label()(implicit ev: TensorNumeric[T]): Tensor[T] = {
-    throw new UnsupportedOperationException("Sample.label(): unimplemented deprecated method")
-  }
+  def label()(implicit ev: TensorNumeric[T]): Tensor[T]
+
+  /**
+   * Get label tensor for given index
+   * @param index index of specific sample
+   */
+  def label(index: Int)(implicit ev: TensorNumeric[T]): Tensor[T]
 
   /**
    * Set data of feature and label.
@@ -129,7 +135,7 @@ abstract class Sample[T: ClassTag] extends Serializable {
 /**
  * A kind of sample who use only one array
  */
-private[bigdl] class ArraySample[T: ClassTag](
+class ArraySample[T: ClassTag] private[bigdl](
       private val data: Array[T],
       private val featureSize: Array[Array[Int]],
       private val labelSize: Array[Array[Int]]) extends Sample[T] {
@@ -173,19 +179,34 @@ private[bigdl] class ArraySample[T: ClassTag](
     }
   }
 
-  @deprecated("Old interface", "0.2.0")
   override def feature()(implicit ev: TensorNumeric[T]): Tensor[T] = {
-    require(featureSize.length == 1, "Old interface for 1 feature Sample. " +
-      s"got ${featureSize.length} feature Sample")
-    Tensor[T](Storage(data), 1, getFeatureSize()(0))
+    require(this.numFeature == 1, "Only one Sample required in total" +
+      s"got ${featureSize.length} feature Sample, please use feature(index) instead")
+    feature(0)
   }
 
-  @deprecated("Old interface", "0.2.0")
+  override def feature(index: Int)(implicit ev: TensorNumeric[T]): Tensor[T] = {
+    require(this.numFeature > index, "feature index out of range")
+    val featureOffSet = 1 + getFeatureSize().zipWithIndex.
+      filter(_._2 < index).map(_._1.product).sum
+    Tensor[T](Storage(data), featureOffSet, getFeatureSize()(index))
+  }
+
+  override def label(index: Int)(implicit ev: TensorNumeric[T]): Tensor[T] = {
+    require(this.numFeature > index, "label index out of range")
+    if (this.numLabel > index) {
+      val labelOffSet = 1 + getFeatureSize().map(_.product).sum + getLabelSize().zipWithIndex
+        .filter(_._2 < index).map(_._1.product).sum
+      Tensor[T](Storage[T](data), labelOffSet, labelSize(index))
+    } else {
+      null
+    }
+  }
+
   override def label()(implicit ev: TensorNumeric[T]): Tensor[T] = {
-    require(labelSize.length == 1, "Old interface for 1 label Sample. " +
-      s"got ${labelSize.length} label Sample")
-    Tensor[T](Storage(data), getFeatureSize().map(_.product).sum + 1,
-      labelSize(0))
+    require(this.numLabel <= 1, "Only one Sample required in total " +
+      s"got ${labelSize.length} label Sample, please use label(index) instead")
+    label(0)
   }
 
   @deprecated("Old interface", "0.2.0")
@@ -227,6 +248,22 @@ private[bigdl] class ArraySample[T: ClassTag](
 }
 
 object ArraySample {
+  private def typeCheck[T: ClassTag](tensor: Tensor[T]): Unit = {
+    tensor.getTensorType match {
+      case DenseType =>
+        require(tensor.isContiguous(), s"tensor in ArraySample should be contiguous," +
+          s" Please check your input.")
+      case _ =>
+        throw new IllegalArgumentException(s"ArraySample doesn't support ${tensor.getTensorType}")
+    }
+  }
+
+  private def typeCheck[T: ClassTag](tensors: Array[Tensor[T]]): Unit = {
+    tensors.foreach{tensor =>
+      typeCheck(tensor)
+    }
+  }
+
   def apply[T: ClassTag](
         data: Array[T],
         featureSize: Array[Array[Int]],
@@ -237,8 +274,8 @@ object ArraySample {
   def apply[T: ClassTag](
         featureTensor: Tensor[T],
         labelTensor: Tensor[T])(implicit ev: TensorNumeric[T]) : Sample[T] = {
-    require(featureTensor.isContiguous(), "featureTensor is not contiguous")
-    require(labelTensor.isContiguous(), "labelTensor is not contiguous")
+    typeCheck(featureTensor)
+    typeCheck(labelTensor)
     val data = new Array[T](featureTensor.nElement() + labelTensor.nElement())
     ev.arraycopy(featureTensor.storage().array(), featureTensor.storageOffset() - 1,
       data, 0, featureTensor.nElement())
@@ -250,7 +287,7 @@ object ArraySample {
   def apply[T: ClassTag](
         featureTensor: Tensor[T],
         label: T)(implicit ev: TensorNumeric[T]) : Sample[T] = {
-    require(featureTensor.isContiguous(), "featureTensor is not contiguous")
+    typeCheck(featureTensor)
     val data = new Array[T](featureTensor.nElement() + 1)
     ev.arraycopy(featureTensor.storage().array(), featureTensor.storageOffset() - 1,
       data, 0, featureTensor.nElement())
@@ -261,6 +298,8 @@ object ArraySample {
   def apply[T: ClassTag](
         featureTensors: Array[Tensor[T]],
         labelTensor: Tensor[T])(implicit ev: TensorNumeric[T]) : Sample[T] = {
+    typeCheck(featureTensors)
+    typeCheck(labelTensor)
     val tensors = featureTensors ++ Array(labelTensor)
     val data = new Array[T](tensors.map(_.nElement()).sum)
     copy(data, tensors)
@@ -270,6 +309,8 @@ object ArraySample {
   def apply[T: ClassTag](
         featureTensors: Array[Tensor[T]],
         labelTensors: Array[Tensor[T]])(implicit ev: TensorNumeric[T]) : Sample[T] = {
+    typeCheck(featureTensors)
+    typeCheck(labelTensors)
     val tensors = featureTensors ++ labelTensors
     val data = new Array[T](tensors.map(_.nElement()).sum)
     copy(data, tensors)
@@ -278,7 +319,7 @@ object ArraySample {
 
   def apply[T: ClassTag](
         featureTensor: Tensor[T])(implicit ev: TensorNumeric[T]) : Sample[T] = {
-    require(featureTensor.isContiguous(), "featureTensor is not contiguous")
+    typeCheck(featureTensor)
     val data = new Array[T](featureTensor.nElement())
     ev.arraycopy(featureTensor.storage().array(), featureTensor.storageOffset() - 1,
       data, 0, featureTensor.nElement())
@@ -287,6 +328,7 @@ object ArraySample {
 
   def apply[T: ClassTag](
         featureTensors: Array[Tensor[T]])(implicit ev: TensorNumeric[T]) : Sample[T] = {
+    typeCheck(featureTensors)
     val data = new Array[T](featureTensors.map(_.nElement()).sum)
     copy(data, featureTensors)
     new ArraySample[T](data, getSize(featureTensors), null)
@@ -338,8 +380,6 @@ object Sample {
   def apply[T: ClassTag](
         featureTensor: Tensor[T],
         labelTensor: Tensor[T])(implicit ev: TensorNumeric[T]) : Sample[T] = {
-    require(featureTensor.isContiguous(), "featureTensor is not contiguous")
-    require(labelTensor.isContiguous(), "labelTensor is not contiguous")
     if (featureTensor.getTensorType == DenseType) {
       ArraySample(featureTensor, labelTensor)
     } else {
@@ -350,7 +390,6 @@ object Sample {
   def apply[T: ClassTag](
         featureTensor: Tensor[T],
         label: T)(implicit ev: TensorNumeric[T]) : Sample[T] = {
-    require(featureTensor.isContiguous(), "featureTensor is not contiguous")
     if (featureTensor.getTensorType == DenseType) {
       ArraySample(featureTensor, label)
     } else {
@@ -371,7 +410,8 @@ object Sample {
   def apply[T: ClassTag](
         featureTensors: Array[Tensor[T]],
         labelTensors: Array[Tensor[T]])(implicit ev: TensorNumeric[T]) : Sample[T] = {
-    if (featureTensors.exists(_.getTensorType == SparseType)) {
+    if (featureTensors.exists(_.getTensorType == SparseType) ||
+        labelTensors.exists(_.getTensorType == SparseType)) {
       TensorSample(featureTensors, labelTensors)
     } else {
       ArraySample(featureTensors, labelTensors)
@@ -380,7 +420,6 @@ object Sample {
 
   def apply[T: ClassTag](
         featureTensor: Tensor[T])(implicit ev: TensorNumeric[T]) : Sample[T] = {
-    require(featureTensor.isContiguous(), "featureTensor is not contiguous")
     if (featureTensor.getTensorType == SparseType) {
       TensorSample(featureTensor)
     } else {
@@ -404,11 +443,11 @@ object Sample {
  * @param labels label tensors
  * @tparam T numeric type
  */
-private[bigdl] class TensorSample[T: ClassTag](
+class TensorSample[T: ClassTag] private[bigdl] (
       val features: Array[Tensor[T]],
       val labels: Array[Tensor[T]]) extends Sample[T] {
-  val featureSize = features.map(_.size())
-  val labelSize = features.map(_.size())
+  protected val featureSize = features.map(_.size())
+  protected val labelSize = labels.map(_.size())
 
   def featureLength(index: Int): Int = {
     features(0).size(1)
@@ -437,39 +476,110 @@ private[bigdl] class TensorSample[T: ClassTag](
   def getData(): Array[T] = {
     throw new UnimplementedException()
   }
+
+  override def feature()(implicit ev: TensorNumeric[T]): Tensor[T] = {
+    require(this.numFeature == 1, "only sample with one feature supported")
+    this.feature(0)
+  }
+
+  override def feature(index: Int)(implicit ev: TensorNumeric[T]): Tensor[T] = {
+    require(index < this.numFeature, "Index out of range")
+    this.features(index)
+  }
+
+  override def label()(implicit ev: TensorNumeric[T]): Tensor[T] = {
+    require(this.numLabel <= 1, "only sample with at most one label supported")
+    if (this.numLabel == 1) this.label(0) else null
+  }
+
+  override def label(index: Int)(implicit ev: TensorNumeric[T]): Tensor[T] = {
+    require(index < this.numFeature, "Index out of range")
+    if (index < this.numLabel) this.labels(index) else null
+  }
 }
 
 object TensorSample {
+  private def typeCheck[T: ClassTag](tensor: Tensor[T]): Unit = {
+    tensor.getTensorType match {
+      case DenseType =>
+        require(tensor.isContiguous(), s"tensor in TensorSample should be contiguous," +
+          s" Please check your input.")
+      case SparseType =>
+      case _ =>
+        throw new IllegalArgumentException(s"TensorSample doesn't support ${tensor.getTensorType}")
+    }
+  }
+
+  private def typeCheck[T: ClassTag](tensors: Array[Tensor[T]]): Unit = {
+    tensors.foreach{tensor =>
+      typeCheck(tensor)
+    }
+  }
+
   def apply[T: ClassTag](
         featureTensors: Array[Tensor[T]])(implicit ev: TensorNumeric[T]) : Sample[T] = {
+    typeCheck(featureTensors)
     new TensorSample[T](featureTensors, Array())
   }
 
   def apply[T: ClassTag](
-        featureTensors: Tensor[T])(implicit ev: TensorNumeric[T]) : Sample[T] = {
-    new TensorSample[T](Array(featureTensors), Array())
+        featureTensor: Tensor[T])(implicit ev: TensorNumeric[T]) : Sample[T] = {
+    typeCheck(featureTensor)
+    new TensorSample[T](Array(featureTensor), Array())
   }
   def apply[T: ClassTag](
         featureTensors: Array[Tensor[T]],
         labelTensors: Array[Tensor[T]])(implicit ev: TensorNumeric[T]) : Sample[T] = {
+    typeCheck(featureTensors)
+    typeCheck(labelTensors)
     new TensorSample[T](featureTensors, labelTensors)
   }
 
   def apply[T: ClassTag](
         featureTensors: Array[Tensor[T]],
-        labelTensors: Tensor[T])(implicit ev: TensorNumeric[T]) : Sample[T] = {
-    new TensorSample[T](featureTensors, Array(labelTensors))
+        labelTensor: Tensor[T])(implicit ev: TensorNumeric[T]) : Sample[T] = {
+    typeCheck(featureTensors)
+    typeCheck(labelTensor)
+    new TensorSample[T](featureTensors, Array(labelTensor))
   }
 
   def apply[T: ClassTag](
-        featureTensors: Tensor[T],
-        labelTensors: Tensor[T])(implicit ev: TensorNumeric[T]) : Sample[T] = {
-    new TensorSample[T](Array(featureTensors), Array(labelTensors))
+        featureTensor: Tensor[T],
+        labelTensor: Tensor[T])(implicit ev: TensorNumeric[T]) : Sample[T] = {
+    typeCheck(featureTensor)
+    typeCheck(labelTensor)
+    new TensorSample[T](Array(featureTensor), Array(labelTensor))
   }
 
   def apply[T: ClassTag](
-        featureTensors: Tensor[T],
+        featureTensor: Tensor[T],
         label: T)(implicit ev: TensorNumeric[T]) : Sample[T] = {
-    new TensorSample[T](Array(featureTensors), Array(Tensor(1).fill(label)))
+    typeCheck(featureTensor)
+    new TensorSample[T](Array(featureTensor), Array(Tensor(1).fill(label)))
   }
+
+  /**
+   * Create a TensorSample which is able to contains Tensors with different types.
+   *
+   * @tparam T main type
+   * @param featureTensors feature tensors
+   * @param labelTensors label tensors, can be null or empty, default value is null
+   * @return TensorSample
+   */
+  def create[T: ClassTag](
+      featureTensors: Array[Tensor[_]],
+      labelTensors: Array[Tensor[_]] = null)
+    (implicit ev: TensorNumeric[T]) : Sample[T] = {
+    if (labelTensors == null || labelTensors.isEmpty) {
+      TensorSample(wrapType(featureTensors))
+    } else {
+      TensorSample(wrapType(featureTensors), wrapType(labelTensors))
+    }
+  }
+
+  private def wrapType[T: ClassTag](tensor: Array[Tensor[_]])
+    (implicit ev: TensorNumeric[T]): Array[Tensor[T]] = {
+    tensor.map(_.asInstanceOf[Tensor[T]])
+  }
+
 }

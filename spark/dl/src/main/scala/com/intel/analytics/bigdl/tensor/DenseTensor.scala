@@ -68,7 +68,9 @@ private[tensor] class DenseTensor[@specialized T: ClassTag](
     result.squeeze()
   }
 
-  override def size(): Array[Int] = _size.slice(0, this.nDimension)
+  override def size(): Array[Int] = {
+    if (_size == null) null else _size.slice(0, this.nDimension)
+  }
 
   override def size(dim: Int): Int = {
     require(dim > 0 && dim <= this.nDimension,
@@ -76,7 +78,9 @@ private[tensor] class DenseTensor[@specialized T: ClassTag](
     _size(dim - 1)
   }
 
-  override def stride(): Array[Int] = _stride.slice(0, this.nDimension)
+  override def stride(): Array[Int] = {
+    if (_stride == null) null else _stride.slice(0, this.nDimension)
+  }
 
   override def stride(dim: Int): Int = {
     require(dim > 0 && dim <= this.nDimension,
@@ -255,6 +259,8 @@ private[tensor] class DenseTensor[@specialized T: ClassTag](
   private[tensor] def this()(implicit ev: TensorNumeric[T]) = this(null, 0, null, null, 0)
 
   override def fill(v: T): Tensor[T] = {
+    if (this.storage() == null) return this
+
     if (this.isContiguous()) {
       this.storage().fill(v, this.storageOffset(), this.nElement())
     } else {
@@ -273,7 +279,7 @@ private[tensor] class DenseTensor[@specialized T: ClassTag](
   }
 
   override def zero(): Tensor[T] = {
-    this.fill(ev.fromType[Int](0))
+    this.fill(ev.zero)
   }
 
   override def randn(): Tensor[T] = {
@@ -373,10 +379,11 @@ private[tensor] class DenseTensor[@specialized T: ClassTag](
   }
 
   override def set(): Tensor[T] = {
-    this.resize(0)
-    if(this._storage != null) {
+    if (this._storage != null) {
       this._storage.resize(0)
     }
+    this.nDimension = 0
+    this._size = Array[Int]()
     this
   }
 
@@ -403,6 +410,10 @@ private[tensor] class DenseTensor[@specialized T: ClassTag](
 
   override def clone(): Tensor[T] = {
     DenseTensor.newClone(this)
+  }
+
+  override def shallowClone(): Tensor[T] = {
+    Tensor(Storage(this.storage().array()), storageOffset(), size(), stride())
   }
 
   override def emptyInstance(): Tensor[T] = {
@@ -863,6 +874,23 @@ private[tensor] class DenseTensor[@specialized T: ClassTag](
     (values, indices)
   }
 
+  override def sumSquare(): T = {
+    this.dot(this)
+  }
+
+  override def clamp(min: Float, max: Float): Tensor[T] = {
+    val maxT = ev.fromType[Float](max)
+    val minT = ev.fromType[Float](min)
+    val func = new TensorFunc2[T] {
+      override def apply(data1: Array[T], offset1: Int): Unit = {
+        if (ev.isGreater(data1(offset1), maxT)) data1(offset1) = maxT
+        else if (ev.isGreater(minT, data1(offset1))) data1(offset1) = minT
+      }
+    }
+    DenseTensorApply.apply1[T](this, func)
+    this
+  }
+
   def scatter(dim: Int, index: Tensor[T], src: Tensor[T]): Tensor[T] = {
     require(src.dim() == this.dim(), "Input tensor must have same dimensions as output tensor")
     require(dim <= this.dim(), "Index dimension is out of bounds")
@@ -1159,6 +1187,10 @@ private[tensor] class DenseTensor[@specialized T: ClassTag](
    * @param y tensor
    */
   override def cmax(x: Tensor[T], y: Tensor[T]): Tensor[T] = DenseTensorMath.cmax(this, x, y)
+
+  override def cmin(y: Tensor[T]): Tensor[T] = DenseTensorMath.cmin(this, this, y)
+
+  override def cmin(x: Tensor[T], y: Tensor[T]): Tensor[T] = DenseTensorMath.cmin(this, x, y)
 
   override def mul(x: Tensor[T], value: T): Tensor[T] = DenseTensorMath.mul(this, x, value)
 
@@ -1646,7 +1678,7 @@ private[tensor] class DenseTensor[@specialized T: ClassTag](
   }
 
   override def topk(k: Int, dim: Int, increase: Boolean, result: Tensor[T],
-    indices: Tensor[T]): (Tensor[T], Tensor[T]) = {
+    indices: Tensor[T], sortedResult: Boolean = true): (Tensor[T], Tensor[T]) = {
     val selectDim = if (dim == -1) this.dim() else dim
     require(selectDim > 0 && selectDim <= this.nDimension)
 
@@ -1676,8 +1708,13 @@ private[tensor] class DenseTensor[@specialized T: ClassTag](
           if (increase) ev.isGreater(r._1, l._1) else ev.isGreater(l._1, r._1))
         i = 0
         while (i < k) {
-          vdata(voffset + i * vstride) = sorted(i)._1
-          idata(ioffset + i * istride) = ev.fromType(sorted(i)._2)
+          if (sortedResult) {
+            vdata(voffset + i * vstride) = sorted(i)._1
+            idata(ioffset + i * istride) = ev.fromType(sorted(i)._2)
+          } else {
+            vdata(voffset + (k - i - 1) * vstride) = sorted(i)._1
+            idata(ioffset + (k - i - 1) * istride) = ev.fromType(sorted(i)._2)
+          }
           i += 1
         }
       })
@@ -1688,6 +1725,8 @@ private[tensor] class DenseTensor[@specialized T: ClassTag](
   override def pow(x: Tensor[T], n: T): Tensor[T] = DenseTensorMath.pow[T](this, x, n)
 
   override def pow(n: T): Tensor[T] = DenseTensorMath.pow[T](this, this, n)
+
+  override def square(): Tensor[T] = pow(ev.fromType(2.0))
 
   override def log(x: Tensor[T]): Tensor[T] = DenseTensorMath.log[T](this, x)
 
@@ -1932,12 +1971,12 @@ private[tensor] class DenseTensor[@specialized T: ClassTag](
   override def sign(): Tensor[T] = {
     val func = new TensorFunc2[T] {
       override def apply(data1: Array[T], offset1: Int): Unit = {
-        if (ev.isGreater(data1(offset1), ev.fromType(0))) {
-          data1(offset1) = ev.fromType(1)
-        } else if (ev.isGreater(ev.fromType(0), data1(offset1))) {
+        if (ev.isGreater(data1(offset1), ev.zero)) {
+          data1(offset1) = ev.one
+        } else if (ev.isGreater(ev.zero, data1(offset1))) {
           data1(offset1) = ev.fromType(-1)
         } else {
-          data1(offset1) = ev.fromType(0)
+          data1(offset1) = ev.zero
         }
       }
     }
@@ -2110,10 +2149,63 @@ private[tensor] class DenseTensor[@specialized T: ClassTag](
     this.apply1(a => ev.floor(a))
   }
 
+  override def ceil(): Tensor[T] = {
+    this.apply1(a => ev.ceil(a))
+  }
+
   override def negative(x: Tensor[T]): Tensor[T] = {
     this.map(x, (a, b) => ev.negative(b))
     this
   }
+
+  override def inv(): Tensor[T] = {
+    this.apply1(a => ev.inv(a))
+  }
+
+  override def reduce(dim: Int, result: Tensor[T], reducer: (T, T) => T): Tensor[T] = {
+    DenseTensorDimApply.dimApply2[T](result.asInstanceOf[DenseTensor[T]], this, dim - 1,
+      (r, rOffset, rStride, rSize, t, tOffset, tStride, tSize) => {
+        r(rOffset) = t(tOffset)
+        var i = 1
+        while(i < tSize) {
+          r(rOffset) = reducer(r(rOffset), t(tOffset + i * tStride))
+          i += 1
+        }
+      })
+    result
+  }
+
+  override def toArray(): Array[T] = {
+    require(this.dim() == 1, "toArray only support 1D tensor")
+    val n = this.nElement()
+    val array = new Array[T](n)
+    var i = 0
+    while(i < n) {
+      array(i) = this.valueAt(i + 1)
+      i += 1
+    }
+
+    array
+  }
+
+  override def erf(): Tensor[T] = {
+    this.apply1(a => ev.erf(a))
+  }
+
+  override def erfc(): Tensor[T] = {
+    this.apply1(a => ev.erfc(a))
+  }
+
+  override def logGamma(): Tensor[T] = {
+    this.apply1(a => ev.logGamma(a))
+  }
+
+  override def digamma(): Tensor[T] = {
+    this.apply1(a => ev.digamma(a))
+  }
+
+  override private[bigdl] def toQuantizedTensor: QuantizedTensor[T] =
+    throw new IllegalArgumentException("DenseTensor cannot be cast to QuantizedTensor")
 }
 
 object DenseTensor {
@@ -2215,19 +2307,14 @@ object DenseTensor {
     var hasCorrectSize = true
     var nDim_ = 0
     var d = 0
-    var break = false
-    while (d < nDim && !break) {
-      if (_size(d) > 0) {
-        nDim_ = nDim_ + 1
-        if (self.nDimension > d && _size(d) != self._size(d)) {
-          hasCorrectSize = false
-        }
-        if (self.nDimension > d && _stride != null && _stride(d) >= 0 &&
-          _stride(d) != self._stride(d)) {
-          hasCorrectSize = false
-        }
-      } else {
-        break = true
+    while (d < nDim) {
+      nDim_ = nDim_ + 1
+      if (self.nDimension > d && _size(d) != self._size(d)) {
+        hasCorrectSize = false
+      }
+      if (self.nDimension > d && _stride != null && _stride(d) >= 0 &&
+        _stride(d) != self._stride(d)) {
+        hasCorrectSize = false
       }
       d += 1
     }
@@ -2573,7 +2660,7 @@ object DenseTensor {
     gauss
   }
 
-  private[tensor] def canFastBroadcast[@specialized T](tensor: Tensor[T],
+  private[tensor] def canFastBroadcast[T](tensor: Tensor[T],
     other: Tensor[T]): Boolean = {
     if (tensor.nDimension < other.nDimension()) return false
 
@@ -2594,7 +2681,7 @@ object DenseTensor {
     return true
   }
 
-  private[tensor] def expandSize[@specialized T: ClassTag](tensor: Tensor[T],
+  private[tensor] def expandSize[T: ClassTag](tensor: Tensor[T],
     other: Tensor[T]): Array[Int] = {
     val errorMsg = s"tensor size not match ${tensor.size.mkString("x")} " +
       s"${other.size.mkString("x")}"
@@ -2624,16 +2711,16 @@ object DenseTensor {
         sparseTensor: SparseTensor[T],
         res: Tensor[T] = null)(implicit ev: TensorNumeric[T]): Tensor[T] = {
     val dt = if (null == res) Tensor(sparseTensor.size()) else res
-    var i = 0
-    val index = new Array[Int](dt.dim())
-    while (i < sparseTensor._indices(0).length) {
-      var j = 0
-      while (j < index.length) {
-        index(j) = sparseTensor._indices(j)(i) + 1
-        j += 1
+    val srcIndex = new Array[Int](dt.dim())
+    val tgtIndex = new Array[Int](dt.dim())
+    // fill DenseTensor with sparseTensors' active values one by one
+    (0 until sparseTensor._nElement).foreach { i =>
+      // targetIndex = sourceIndex - indicesOffset
+      srcIndex.indices.foreach { j =>
+        srcIndex(j) = sparseTensor._indices(j)(i + sparseTensor._storageOffset) + 1
+        tgtIndex(j) = srcIndex(j) - sparseTensor._indicesOffset(j)
       }
-      dt(index) = sparseTensor(index)
-      i += 1
+      dt(tgtIndex) = sparseTensor(srcIndex)
     }
     dt
   }

@@ -17,7 +17,10 @@ package com.intel.analytics.bigdl.nn
 
 import com.intel.analytics.bigdl.tensor.Tensor
 import com.intel.analytics.bigdl.utils.T
+import com.intel.analytics.bigdl.utils.serializer.ModuleSerializationTest
 import org.scalatest.{FlatSpec, Matchers}
+
+import scala.util.Random
 
 @com.intel.analytics.bigdl.tags.Parallel
 class MapTableSpec  extends FlatSpec with Matchers {
@@ -74,5 +77,27 @@ class MapTableSpec  extends FlatSpec with Matchers {
     val mapGradInput = map.backward(input, gradOutput)
 
     mapGradInput should equal (expectedGradInput)
+  }
+
+  "A MapTable clearstate" should "add not change modules" in {
+    val linear1 = new Linear[Float](10, 3)
+    val map = new MapTable[Float](linear1)
+
+    map.clearState()
+    map.modules.length should be (1)
+  }
+}
+
+class MapTableSerialTest extends ModuleSerializationTest {
+  override def test(): Unit = {
+    val linear = Linear[Float](2, 2)
+    val mapTable = new MapTable[Float]().setName("mapTable")
+    mapTable.add(linear)
+    val input1 = Tensor[Float](2).apply1(_ => Random.nextFloat())
+    val input2 = Tensor[Float](2).apply1(_ => Random.nextFloat())
+    val input = T()
+    input(1.0.toFloat) = input1
+    input(2.0.toFloat) = input2
+    runSerializationTest(mapTable, input)
   }
 }

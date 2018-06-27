@@ -15,27 +15,35 @@
  */
 package com.intel.analytics.bigdl.utils.serializer
 
-import java.lang.reflect.Field
-
 import com.intel.analytics.bigdl.Module
 import com.intel.analytics.bigdl.nn._
-
-import scala.collection.JavaConverters._
-import scala.reflect.runtime.universe
 import com.intel.analytics.bigdl.nn.abstractnn.{AbstractModule, Activity, TensorModule}
+import com.intel.analytics.bigdl.nn.keras.{KerasLayer, KerasLayerSerializer, Model, Sequential => KSequential}
+import com.intel.analytics.bigdl.nn.ops.{RandomUniform => RandomUniformOps}
+import com.intel.analytics.bigdl.nn.tf.{DecodeRawSerializer, ParseExample, StrideSlice}
 import com.intel.analytics.bigdl.optim.Regularizer
-import com.intel.analytics.bigdl.tensor.{Tensor, TensorNumericMath}
+import com.intel.analytics.bigdl.tensor.Tensor
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
-import serialization.Bigdl.{AttrValue, BigDLModule}
+import com.intel.analytics.bigdl.utils.serializer.converters.DataConverter
 
 import scala.collection.mutable
+import scala.language.existentials
 import scala.reflect.ClassTag
+import scala.reflect.runtime.universe
 
 object ModuleSerializer extends ModuleSerializable{
 
   private val runtimeMirror = universe.runtimeMirror(getClass.getClassLoader)
 
-  private val serializerMaps = new mutable.HashMap[String, ModuleSerializable]()
+  private val serializerMaps = new mutable.HashMap[String, ModuleSerializable]
+
+  // group serializer for one serializer to handle multiple layers of the same super type
+
+  // super type class to serializer
+
+  private val groupSerializerMaps = new mutable.HashMap[String, ModuleSerializable]()
+
+  private[serializer] val _lock = new Object
 
   // generic type definition for type matching
 
@@ -61,18 +69,45 @@ object ModuleSerializer extends ModuleSerializable{
     val module = serializerContext.moduleData.module
     // For those layers which have their own serialization/deserialization methods
     val clsName = module.getClass.getName
-    if (serializerMaps.contains(clsName)) {
-      serializerMaps(clsName).serializeModule(serializerContext)
+    val (serializer, serContext) = if (serializerMaps.contains(clsName)) {
+      (serializerMaps(clsName), serializerContext)
     } else {
+      // if no layer specific implementation, check if serializer of the same type exists
+      val (groupSerializer, group) = findGroupSerializer(serializerContext.moduleData.module)
+      if (groupSerializer != null) {
+        val context = SerializeContext[T](serializerContext.moduleData,
+        serializerContext.storages, serializerContext.storageType,
+          serializerContext.copyWeightAndBias, group)
+        (groupSerializer, context)
+      } else {
       val m = module.asInstanceOf[AbstractModule[_, _, _]]
       m match {
-        case container : Container[_, _, _] =>
-          ContainerSerializer.serializeModule(serializerContext)
-        case cell : Cell[_] =>
-          CellSerializer.serializeModule(serializerContext)
-        case _ => ModuleSerializer.serializeModule(serializerContext)
+        case kerasLayer: KerasLayer[_, _, _] =>
+          (KerasLayerSerializer, serializerContext)
+        case container: Container[_, _, _] =>
+          (ContainerSerializer, serializerContext)
+        case cell: Cell[_] =>
+          (CellSerializer, serializerContext)
+        case _ => (ModuleSerializer, serializerContext)
+        }
       }
     }
+    serializer.setCopyWeightAndBias(serContext.copyWeightAndBias).
+      serializeModule(serContext)
+  }
+
+  private def findGroupSerializer[T: ClassTag](module : Module[T])
+    (implicit ev: TensorNumeric[T]): (ModuleSerializable, String) = {
+    var cls : Class[_] = module.getClass.getSuperclass
+    var clsName = cls.getName
+    while (clsName != "java.lang.Object") {
+      if (groupSerializerMaps.contains(clsName)) {
+        return (groupSerializerMaps(clsName), clsName)
+      }
+      cls = cls.getSuperclass
+      clsName = cls.getName
+    }
+    (null, null)
   }
 
   /**
@@ -84,28 +119,40 @@ object ModuleSerializer extends ModuleSerializable{
                        (implicit ev: TensorNumeric[T]) : ModuleData[T] = {
     try {
       val model = context.bigdlModule
-      if (serializerMaps.contains(model.getModuleType)) {
-        serializerMaps(model.getModuleType).loadModule(context)
+      val deSerializer = if (serializerMaps.contains(model.getModuleType)) {
+        serializerMaps(model.getModuleType)
       } else {
         val attrMap = model.getAttrMap
-        val subModuleCount = model.getSubModulesCount
-        if (subModuleCount > 0) {
-          ContainerSerializer.loadModule(context)
+        if (attrMap.containsKey(SerConst.GROUP_TYPE)) {
+          val groupTypeAttr = attrMap.get(SerConst.GROUP_TYPE)
+          val groupType = DataConverter.getAttributeValue(context, groupTypeAttr).
+            asInstanceOf[String]
+          require(groupSerializerMaps.contains(groupType), s" Group serializer does" +
+            s" not exist for $groupType")
+          groupSerializerMaps(groupType)
         } else {
-          if (attrMap.containsKey("is_cell_module")) {
-            CellSerializer.loadModule(context)
+          val subModuleCount = model.getSubModulesCount
+          if (subModuleCount > 0) {
+            ContainerSerializer
           } else {
-            ModuleSerializer.loadModule(context)
+            if (attrMap.containsKey("is_cell_module")) {
+              CellSerializer
+            } else if (attrMap.containsKey("is_keras_module")) {
+              KerasLayerSerializer
+            } else {
+              ModuleSerializer
+            }
           }
         }
       }
+      deSerializer.setCopyWeightAndBias(context.copyWeightAndBias).
+        loadModule(context)
     } catch {
       case e: Exception =>
         throw new RuntimeException(
           s"Loading module ${context.bigdlModule.getModuleType} exception :", e)
     }
   }
-
 
   /**
    * register module for single module, used for standard BigDL module and user defined module
@@ -114,18 +161,36 @@ object ModuleSerializer extends ModuleSerializable{
    */
   def registerModule(moduleType : String, serializer : ModuleSerializable) : Unit = {
     require(!serializerMaps.contains(moduleType), s"$moduleType already registered!")
+    require(!groupSerializerMaps.contains(moduleType), s"$moduleType already " +
+      s"registered with group serializer!")
     serializerMaps(moduleType) = serializer
+  }
+
+  /**
+   * register module for modules of the same type, used for
+   * standard BigDL module and user defined module
+   * @param superModuleType,must be unique
+   * @param groupSerializer serialzable implementation for this module
+   */
+  def registerGroupModules(superModuleType : String, groupSerializer :
+    ModuleSerializable) : Unit = {
+    require(!serializerMaps.contains(superModuleType), s"$moduleType already " +
+      s"registered with single serializer!")
+    require(!groupSerializerMaps.contains(superModuleType), s"$moduleType already " +
+      s"registered with group serializer!")
+    groupSerializerMaps(superModuleType) = groupSerializer
   }
 
   private[serializer] def getCostructorMirror[T : ClassTag](cls : Class[_]):
     universe.MethodMirror = {
-    lock.synchronized {
+    getLock.synchronized {
       val clsSymbol = runtimeMirror.classSymbol(cls)
       val cm = runtimeMirror.reflectClass(clsSymbol)
       // to make it compatible with both 2.11 and 2.10
       val ctorCs = clsSymbol.toType.declaration(universe.nme.CONSTRUCTOR)
       val primary: Option[universe.MethodSymbol] = ctorCs.asTerm.alternatives.collectFirst {
-        case cstor: universe.MethodSymbol if cstor.isPrimaryConstructor => cstor
+        case cstor if cstor.asInstanceOf[universe.MethodSymbol].isPrimaryConstructor =>
+          cstor.asInstanceOf[universe.MethodSymbol]
       }
       cm.reflectConstructor(primary.get)
     }
@@ -172,10 +237,17 @@ object ModuleSerializer extends ModuleSerializable{
     registerModule("com.intel.analytics.bigdl.nn.SpatialBatchNormalization", BatchNormalization)
     registerModule("com.intel.analytics.bigdl.nn.BinaryTreeLSTM", BinaryTreeLSTM)
     registerModule("com.intel.analytics.bigdl.nn.BiRecurrent", BiRecurrent)
-    registerModule("com.intel.analytics.bigdl.nn.Graph", Graph)
+    registerModule("com.intel.analytics.bigdl.nn.CAddTable", CAddTable)
+    registerModule("com.intel.analytics.bigdl.nn.StaticGraph", Graph)
+    registerModule("com.intel.analytics.bigdl.nn.DynamicGraph", Graph)
+    registerModule("com.intel.analytics.bigdl.nn.keras.Model", Model)
+    registerModule("com.intel.analytics.bigdl.nn.keras.Sequential", KSequential)
+    registerModule("com.intel.analytics.bigdl.nn.keras.KerasLayerWrapper", KerasLayerSerializer)
     registerModule("com.intel.analytics.bigdl.nn.MapTable", MapTable)
+    registerModule("com.intel.analytics.bigdl.nn.Maxout", Maxout)
     registerModule("com.intel.analytics.bigdl.nn.MaskedSelect", MaskedSelect)
     registerModule("com.intel.analytics.bigdl.nn.Recurrent", Recurrent)
+    registerModule("com.intel.analytics.bigdl.nn.RecurrentDecoder", RecurrentDecoder)
     registerModule("com.intel.analytics.bigdl.nn.Reshape", Reshape)
     registerModule("com.intel.analytics.bigdl.nn.Scale", Scale)
     registerModule("com.intel.analytics.bigdl.nn.SpatialContrastiveNormalization",
@@ -189,6 +261,7 @@ object ModuleSerializer extends ModuleSerializable{
     registerModule("com.intel.analytics.bigdl.nn.SpatialSubtractiveNormalization",
       SpatialSubtractiveNormalization)
     registerModule("com.intel.analytics.bigdl.nn.Transpose", Transpose)
+    registerModule("com.intel.analytics.bigdl.nn.TimeDistributed", TimeDistributed)
     registerModule("com.intel.analytics.bigdl.nn.VolumetricMaxPooling", VolumetricMaxPooling)
     registerModule("com.intel.analytics.bigdl.nn.Echo", Echo)
     registerModule("com.intel.analytics.bigdl.nn.quantized.SpatialConvolution",
@@ -197,6 +270,14 @@ object ModuleSerializer extends ModuleSerializable{
       quantized.SpatialDilatedConvolution)
     registerModule("com.intel.analytics.bigdl.nn.quantized.Linear",
       quantized.Linear)
+    registerModule("com.intel.analytics.bigdl.nn.tf.ParseExample", ParseExample)
+    registerModule("com.intel.analytics.bigdl.nn.SReLU", SReLU)
+    registerModule("com.intel.analytics.bigdl.nn.tf.DecodeRaw", DecodeRawSerializer)
+    registerModule("com.intel.analytics.bigdl.nn.ops.RandomUniform", RandomUniformOps)
+    registerModule("com.intel.analytics.bigdl.nn.tf.StrideSlice", StrideSlice)
+    registerModule("com.intel.analytics.bigdl.nn.MultiRNNCell", MultiRNNCell)
+    registerModule("com.intel.analytics.bigdl.nn.SpatialSeparableConvolution",
+      SpatialSeparableConvolution)
   }
 }
 

@@ -182,6 +182,7 @@ grad input of m is : [[[[-0.02344826 -0.06515953 -0.03618064]
    [-0.02346931 -0.1815301  -0.18314059]]]]
 ```
 
+---
 ## VolumetricConvolution ##
 
 **Scala:**
@@ -200,6 +201,7 @@ in forward(input) is expected to be a 5D tensor (`batch x nInputPlane x depth(ti
 a 4D tensor (`nInputPlane x depth x height x width`).
 Output of forward(input) is also expected to be a 5D tensor (`batch x depth(time) x outputPlane x height x width`) or
 a 4D tensor (`outputPlane x depth x height x width`).
+As for padding, when padW,padH, padT are all -1, we use a padding algorithm similar to the "SAME" padding of tensorflow.
 
 * `nInputPlane` The number of expected input planes in the image given into forward()
 * `nOutputPlane` The number of output planes the convolution layer will produce.
@@ -287,6 +289,7 @@ array([[[[ 0.54268712]]],
 
 ```
 
+---
 ## SpatialDilatedConvolution ##
 
 **Scala:**
@@ -431,6 +434,7 @@ array([[[ 0.1       ,  0.2       ,  0.1       ,  0.2       ],
         [ 0.30000001,  0.40000001,  0.30000001,  0.40000001]]], dtype=float32)
 
 ```
+
 ---
 ## SpatialShareConvolution ##
 
@@ -549,6 +553,7 @@ array([[[[-3.55372381, -4.0352459 , -2.65861344],
        [[[-3.55372381, -4.0352459 , -2.65861344],
          [-4.99829054, -5.4798131 , -3.29477644]]]], dtype=float32)
 ```
+
 ---
 ## SpatialFullConvolution ##
 
@@ -801,6 +806,123 @@ output m is : [[[-0.04712385  0.21949144  0.0843184   0.14336972]
   [-0.38188276 -0.36746511 -0.37627563 -0.34141305]]]
 ```
 
+---
+## SpatialSeparableConvolution ##
+
+**Scala:**
+```scala
+val m  = SpatialSeparableConvolution(nInputChannel, nOutputChannel, depthMultiplier, kW, kH, sW = 1, sH = 1, pW = 0, pH = 0, hasBias = True, dataFormat = DataFormat.NCHW, wRegularizer = null, bRegularizer = null, pRegularizer = null, initDepthWeight = null, initPointWeight = null, initBias = null)
+```
+**Python:**
+```python
+m = SpatialSeparableConvolution(n_input_channel, n_output_channel, depth_multiplier, kernel_w, kernel_h, stride_w=1, stride_h=1, pad_w=0, pad_h=0, with_bias=True, data_format="NCHW", w_regularizer=None, b_regularizer=None, p_regularizer=None)
+```
+
+Separable convolutions consist in first performing a depthwise spatial convolution (which acts
+on each input channel separately) followed by a pointwise convolution which mixes together the
+resulting output channels. The  depthMultiplier argument controls how many output channels are
+enerated per input channel in the depthwise step.
+
+ * `nInputChannel` The number of expected input planes in the image given into forward()
+ * `nOutputChannel` The number of output planes the convolution layer will produce.
+ * `depthMultiplier` how many internal channels are generated per input channel
+ * `kW` The kernel width of the convolution.
+ * `kH` The kernel height of the convolution.
+ * `sW` The step of the convolution in the width dimension.
+ * `sH` The step of the convolution in the height dimension.
+ * `pW` The additional zeros added per width to the input planes. Default is 0.
+ * `pH` The additional zeros added per height to the input planes. Default is 0.
+ * `hasBias` do we use a bias on the output, default is true
+ * `dataFormat` image data format, which can be NHWC or NCHW, default value is NCHW
+ * `wRegularizer` kernel parameter regularizer
+ * `bRegularizer` bias regularizer
+ * `pRegularizer` point wise kernel parameter regularizer
+ * `initDepthWeight` kernel parameter init tensor
+ * `initPointWeight` point wise kernel parameter init tensor
+ * `initBias` bias init tensor
+ 
+**Scala example:**
+
+```scala
+
+scala>
+import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric.NumericFloat
+import com.intel.analytics.bigdl.nn._
+import com.intel.analytics.bigdl.tensor._
+import com.intel.analytics.bigdl.nn.abstractnn.DataFormat
+
+val m = SpatialSeparableConvolution[Float](1, 2, 1, 2, 2, dataFormat = DataFormat.NCHW)
+val input = Tensor(1, 1, 3, 3).randn()
+val output = m.forward(input)
+val gradOut = Tensor(1, 2, 2, 2).fill(0.1f)
+val gradIn = m.backward(input,gradOut)
+
+scala> print(input)
+(1,1,.,.) =
+-0.6636712      -1.3765892      -1.51044
+0.4502934       -0.38438025     -0.4279503
+-1.5327895      -0.33594692     1.5972415
+
+[com.intel.analytics.bigdl.tensor.DenseTensor$mcF$sp of size 1x1x3x3]
+
+scala> print(output)
+(1,1,.,.) =
+-0.2903078      -0.5241474
+-0.17961408     -0.11239494
+
+(1,2,.,.) =
+-1.3147768      -2.3738143
+-0.81345534     -0.5090261
+
+[com.intel.analytics.bigdl.tensor.DenseTensor of size 1x2x2x2]
+
+scala> print(gradOut)
+(1,1,.,.) =
+0.1     0.1
+0.1     0.1
+
+(1,2,.,.) =
+0.1     0.1
+0.1     0.1
+
+[com.intel.analytics.bigdl.tensor.DenseTensor$mcF$sp of size 1x2x2x2]
+
+scala> print(gradIn)
+(1,1,.,.) =
+0.088415675     0.17780215      0.08938648
+0.15242647      0.26159728      0.109170794
+0.06401079      0.08379511      0.019784318
+
+[com.intel.analytics.bigdl.tensor.DenseTensor of size 1x1x3x3]
+```
+
+
+**Python example:**
+```python
+from bigdl.nn.layer import *
+import numpy as np
+
+m = SpatialSeparableConvolution(1, 2, 1, 2, 2)
+tensor_input = np.random.rand(1, 1, 3, 3)
+print "input is :",tensor_input
+out = m.forward(tensor_input)
+print "output m is :",out
+```
+Gives the output,
+
+```python
+creating: createSpatialFullConvolution
+input is : [[[[ 0.77269038  0.82476003  0.58228669]
+   [ 0.35123569  0.25496535  0.16736527]
+   [ 0.62138293  0.83156875  0.77565037]]]]
+output m is : [[[[ 0.91489887  0.81591743]
+   [ 0.84698057  0.76615578]]
+
+  [[ 1.05583775  0.94160837]
+   [ 0.97745675  0.88418102]]]]
+```
+
+---
 ## SpatialConvolutionMap ##
 
 **Scala:**
@@ -919,6 +1041,7 @@ Gives the output,
         [ 0.86757064,  0.91269422,  0.95781779]]], dtype=float32)]
 ```
 
+---
 ## TemporalConvolution ##
 
 **Scala:**
@@ -1124,6 +1247,7 @@ gradient input m is : [[[0.0	0.0	0.0	0.0	0.012729122070595622]
 
 [com.intel.analytics.bigdl.tensor.DenseTensor of size 1x8x5]
 ```
+
 ---
 ## VolumetricFullConvolution ##
 
@@ -1591,3 +1715,650 @@ output m is : [[[[[ 0.24059629  0.11875484 -0.07601731  0.18490529]
     [ 0.25339472 -0.09679155  0.09070791  0.21198538]]]]]
 ```
 
+---
+## LocallyConnected1D ##
+
+**Scala:**
+```scala
+val module = LocallyConnected1D(
+  nInputFrame,inputFrameSize, outputFrameSize, kernelW, strideW = 1, propagateBack = true,
+  wRegularizer = null, bRegularizer = null, initWeight = null, initBias = null,
+  initGradWeight = null, initGradBias = null)
+```
+**Python:**
+```python
+module = LocallyConnected1D(
+  n_input_frame, input_frame_size, output_frame_size, kernel_w, stride_w=1, propagate_back=True,
+  w_regularizer=None, b_regularizer=None, init_weight=None, init_bias=None,
+  init_grad_weight=None, init_grad_bias=None)
+```
+
+ Applies a 1D convolution over an input sequence composed of nInputFrame frames with unshared weights.
+ The input tensor in `forward(input)` is expected to be a 3D tensor
+ (`nBatchFrame` x `nInputFrame` x `inputFrameSize`) or a 2D tensor
+ (`nInputFrame` x `inputFrameSize`).
+ Output of `forward(input)` is expected to be a 3D tensor
+ (`nBatchFrame` x `nOutputFrame` x `outputFrameSize`) or a 2D tensor
+ (`nOutputFrame` x `outputFrameSize`).
+
+* `nInputFrame` Length of the input frame expected in sequences given into `forward()`.
+* `inputFrameSize` The input frame size expected in sequences given into `forward()`.
+* `outputFrameSize` The output frame size the convolution layer will produce.
+* `kernelW` The kernel width of the convolution
+* `strideW` The step of the convolution in the width dimension.
+* `propagateBack` Whether propagate gradient back, default is true.
+* `wRegularizer` instance of `Regularizer`
+                 (eg. L1 or L2 regularization), applied to the input weights matrices.
+* `bRegularizer` instance of `Regularizer`
+                 applied to the bias.
+* `initWeight` Initial weight
+* `initBias` Initial bias
+* `initGradWeight` Initial gradient weight
+* `initGradBias` Initial gradient bias
+* `T` The numeric type in the criterion, usually which are `Float` or `Double`
+ 
+**Scala example:**
+```scala
+import com.intel.analytics.bigdl.numeric.NumericFloat
+val seed = 100
+RNG.setSeed(seed)
+val nInputFrame = 10
+val inputFrameSize = 5
+val outputFrameSize = 3
+val kW = 5
+val dW = 2
+val layer = LocallyConnected1D(nInputFrame, inputFrameSize, outputFrameSize, kW, dW)
+
+Random.setSeed(seed)
+val input = Tensor(10, 5).apply1(e => Random.nextFloat())
+val gradOutput = Tensor(3, 3).apply1(e => Random.nextFloat())
+
+val output = layer.updateOutput(input)
+> println(output)
+(1,.,.) =
+-0.2896616	0.018883035	-0.45641226	
+-0.41183263	-0.33292565	0.27988705	
+0.076636955	-0.39710814	0.59631383	
+
+[com.intel.analytics.bigdl.tensor.DenseTensor of size 3x3]
+
+val gradInput = layer.updateGradInput(input, gradOutput)
+> println(gradInput)
+(1,.,.) =
+0.018415622	 -0.10201519  -0.15641063	-0.08271551	  -0.060939234	
+0.13609992	 0.14934899	  0.06083451	-0.13943195	  -0.11092151	
+-0.08760113	 0.06923811	  -0.07376863	0.06743649	  0.042455398	
+0.064692274	 0.15720972	  0.13673763	0.03617531	  0.12507091	
+-0.078272685 -0.25193688  0.10712688	-0.11330205	  -0.19239372	
+-0.10032463	 -0.06266674  0.1048636	    0.26058376	  -0.40386787	
+-0.10379471	 0.07291742	  -0.28790376   0.06023993	  0.057165086	
+0.15167418	 0.07384029	  -0.052450493  -0.07709345	  -0.016432922	
+-0.1044948	 0.060714033  0.08341185	-0.082587965  0.052750245	
+0.0	         0.0	      0.0	        0.0	          0.0	
+
+[com.intel.analytics.bigdl.tensor.DenseTensor of size 10x5]
+```
+
+**Python example:**
+```python
+from bigdl.nn.layer import LocallyConnected1D
+import numpy as np
+nInputFrame = 10
+inputFrameSize = 5
+outputFrameSize = 3
+kW = 5
+dW = 2
+layer = LocallyConnected1D(nInputFrame, inputFrameSize, outputFrameSize, kW, dW)
+
+input = np.random.rand(10, 5)
+gradOutput = np.random.rand(3, 3)
+
+output = layer.forward(input)
+> print(output)
+[[ 0.37944531 -0.25905907 -0.02284177]
+ [-0.06727666 -0.48430425 -0.12338555]
+ [ 0.5237388  -0.72521925 -0.21979821]]
+ 
+gradInput = layer.backward(input, gradOutput)
+> print(gradInput)
+[[-0.22256926 -0.11267932  0.05445758 -0.06569604  0.00799843]
+ [ 0.08402308  0.00340014  0.04202492 -0.05055574  0.11835655]
+ [ 0.00352848 -0.02568576 -0.08056175  0.06994451  0.09152003]
+ [ 0.04089724 -0.19517297  0.19212601 -0.21531224  0.03563112]
+ [-0.28906721  0.07873128 -0.01326483 -0.18504807  0.02452871]
+ [-0.09979478 -0.1009931  -0.25594842  0.14314197 -0.30875987]
+ [-0.00814501 -0.02431242 -0.1140819  -0.14522757 -0.09230929]
+ [-0.11231296  0.0053857   0.00582423  0.18309449  0.13369997]
+ [-0.01302226 -0.13035376  0.02006471  0.09794775 -0.08067283]
+ [ 0.          0.          0.          0.          0.        ]]
+
+```
+
+---
+## LocallyConnected2D ##
+**Scala:**
+```scala
+val module = LocallyConnected2D(
+   nInputPlane, inputWidth, inputHeight, nOutputPlane, kernelW, kernelH, 
+   strideW = 1, strideH = 1, padW = 0, padH = 0, propagateBack = true, 
+   wRegularizer = null, bRegularizer = null, initWeight = null, initBias = null,
+   initGradWeight = null, initGradBias = null, withBias = true, format = DataFormat.NCHW)
+```
+**Python:**
+```python
+module = LocallyConnected2D(
+    n_input_plane, input_width, input_height, n_output_plane,
+    kernel_w, kernel_h, stride_w=1, stride_h=1, pad_w=0, pad_h=0,
+    propagate_back=True, wRegularizer=None, bRegularizer=None,
+    init_weight=None, init_bias=None, init_grad_weight=None,
+    init_grad_bias=None, with_bias=True, data_format="NCHW")
+```                            
+
+The LocallyConnected2D layer works similarly to the [SpatialConvolution](#spatialconvolution) layer, except that weights are unshared, that is, a different set of filters is applied at each different patch of the input.
+
+* `nInputPlane` The number of expected input planes in the image.
+* `inputWidth` The input width.
+* `inputHeight` The input height.
+* `nOutputPlane` The number of output planes the convolution layer will produce.
+* `kernelW` The kernel width of the convolution.
+* `kernelH` The kernel height of the convolution.
+* `strideW` The step of the convolution in the width dimension.
+* `strideH` The step of the convolution in the height dimension.
+* `padW` The additional zeros added per width to the input planes.
+* `padH` The additional zeros added per height to the input planes.
+* `propagateBack` Whether to propagate gradient back.
+* `wRegularizer` Weight regularizer.
+* `bRegularizer` Bias regularizer.
+* `initWeight` Initial weight.
+* `initBias` Initial bias.
+* `initGradWeight` Initial gradient weight.
+* `initGradBias` Initial gradient bias.
+* `withBias` Whether to include bias.
+* `format` Data format of the input. Either "NHWC" or "NCHW".
+
+                
+**Scala example:**
+```scala
+import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric.NumericFloat
+import com.intel.analytics.bigdl.nn.abstractnn.DataFormat
+import com.intel.analytics.bigdl.nn.LocallyConnected2D
+import com.intel.analytics.bigdl.tensor.Tensor
+
+val layer = LocallyConnected2D(2, 6, 3, 3, 1, 2, format=DataFormat.NHWC)
+val input = Tensor(1, 3, 6, 2).rand()
+val output = layer.forward(input)
+
+input: com.intel.analytics.bigdl.tensor.Tensor[Float] =
+(1,1,.,.) =
+0.580334	0.59774524
+0.35452667	0.9134508
+0.56355035	0.10698065
+0.95197415	0.10339011
+0.6571263	0.35572186
+0.31106102	0.97996104
+
+(1,2,.,.) =
+0.87887615	0.8108329
+0.7184107	0.487163
+0.85714895	0.30265027
+0.4407469	0.94804007
+0.5460197	0.01421738
+0.74672765	0.23766468
+
+(1,3,.,.) =
+0.10655104	0.008004449
+0.142883	0.7885532
+0.12025218	0.9536053
+0.85908693	0.088657066
+0.42529714	0.64380044
+0.8999299	0.6074533
+
+[com.intel.analytics.bigdl.tensor.DenseTensor$mcF$sp of size 1x3x6x2]
+
+
+output: com.intel.analytics.bigdl.tensor.Tensor[Float] =
+(1,1,.,.) =
+0.7493179	  0.27513236	-0.2982489
+-0.41126582	  0.21310717	0.36723173
+-0.039210618  0.13379198	-0.28216434
+0.19143593	  -0.61731964	-0.018212453
+0.24316064	  -1.1187351	0.74201244
+0.060099036	  -0.5223875	-0.95892024
+
+(1,2,.,.) =
+-0.4977209	 0.19270697	   -0.00647337
+-0.18642347	 -0.057786018  0.33848432
+0.044415057	 -0.12975587   -0.054034393
+0.46163	     0.06908426	   -0.17127737
+-0.07933617	 0.190754	   0.6044696
+-0.723027	 0.14250416	   0.51286244
+
+[com.intel.analytics.bigdl.tensor.DenseTensor of size 1x2x6x3]
+```
+
+**Python example:**
+```python
+import numpy as np
+from bigdl.nn.layer import LocallyConnected2D
+
+layer = LocallyConnected2D(2, 6, 3, 3, 1, 2, data_format="NHWC")
+input = np.random.rand(1, 3, 6, 2)
+output = layer.forward(input)
+
+print(input)
+[[[[  6.13867469e-01,   5.15609721e-01],
+   [  5.14951616e-01,   4.93308310e-01],
+   [  7.34218405e-01,   6.06311945e-01],
+   [  9.38263668e-01,   3.26766196e-01],
+   [  4.24955447e-02,   3.30625440e-01],
+   [  3.55858423e-01,   6.10869469e-01]],
+
+  [[  3.75525334e-02,   4.93555936e-02],
+   [  4.44188497e-01,   3.51001813e-02],
+   [  8.11139320e-01,   4.87916727e-01],
+   [  4.00786464e-01,   1.65522882e-01],
+   [  5.98298525e-01,   9.54343135e-01],
+   [  2.25942857e-01,   5.76090257e-02]],
+
+  [[  1.34708024e-01,   4.81133433e-01],
+   [  7.63198918e-01,   2.96906096e-01],
+   [  6.01935030e-01,   2.39748841e-01],
+   [  5.32036004e-01,   1.86107334e-01],
+   [  9.38617798e-01,   6.83511632e-04],
+   [  2.34639435e-01,   8.04904706e-01]]]]
+  
+print(output)
+[[[[-0.01100884,  0.59226239, -0.15626255],
+   [ 0.29099607,  0.16722232, -0.39429453],
+   [ 0.22557285,  0.30368266,  0.53235221],
+   [ 0.05602939, -0.07677993, -0.32399753],
+   [ 0.47589377, -0.15926963,  0.1135996 ],
+   [ 0.25957716,  0.17047183,  0.21640816]],
+
+  [[-0.15497619,  0.29392233, -0.12167639],
+   [ 0.60150111, -0.001901  ,  0.294438  ],
+   [-0.05004713,  0.22379839,  0.53971994],
+   [ 0.23204027,  0.17921877,  0.29594338],
+   [ 0.91105354,  0.881271  , -0.69958985],
+   [ 0.45518994, -0.645486  ,  0.37325871]]]]
+```
+
+---
+## UpSampling1D ##
+
+**Scala:**
+```scala
+val module = UpSampling1D(length: Int)
+```
+**Python:**
+```python
+m = UpSampling1D(length)
+```
+UpSampling layer for 1D inputs. Repeats each temporal step length times along the time axis. 
+
+If input's size is (batch, steps, features), then the output's size will be (batch, steps * length, features). 
+
+**Scala example:** 
+
+```scala
+import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric.NumericFloat
+import com.intel.analytics.bigdl.nn._
+import com.intel.analytics.bigdl.tensor._
+import com.intel.analytics.bigdl.utils.T
+
+val module = UpSampling1D(2)
+val input = Tensor(2, 3, 3).range(1, 18)
+module.forward(input)
+```
+The output should be 
+```scala
+res: com.intel.analytics.bigdl.tensor.Tensor[Float] =
+(1,.,.) =
+1.0	2.0	3.0
+1.0	2.0	3.0
+4.0	5.0	6.0
+4.0	5.0	6.0
+7.0	8.0	9.0
+7.0	8.0	9.0
+
+(2,.,.) =
+10.0	11.0	12.0
+10.0	11.0	12.0
+13.0	14.0	15.0
+13.0	14.0	15.0
+16.0	17.0	18.0
+16.0	17.0	18.0
+
+[com.intel.analytics.bigdl.tensor.DenseTensor of size 2x6x3]
+```
+
+**Python example:**
+```python
+from bigdl.nn.layer import *
+import numpy as np
+
+input = np.random.rand(1,2,2,2,2)
+print "input is :",input
+
+m = UpSampling3D([2,2,2])
+out = m.forward(input)
+print "output m is :",out
+```
+Gives the output,
+
+```python
+input is : 
+[[[[[ 0.80314148  0.79158609]
+    [ 0.3988551   0.91726511]]
+   [[ 0.86814757  0.90733343]
+    [ 0.34470172  0.03056507]]]
+
+  [[[ 0.62367481  0.20093996]
+    [ 0.57614891  0.75442351]]
+   [[ 0.52572424  0.04730832]
+    [ 0.74973562  0.2245238 ]]]]]
+creating: createUpSampling3D
+output m is : 
+[[[[[ 0.80314147  0.80314147  0.7915861   0.7915861 ]
+    [ 0.80314147  0.80314147  0.7915861   0.7915861 ]
+    [ 0.39885509  0.39885509  0.91726512  0.91726512]
+    [ 0.39885509  0.39885509  0.91726512  0.91726512]]
+
+   [[ 0.80314147  0.80314147  0.7915861   0.7915861 ]
+    [ 0.80314147  0.80314147  0.7915861   0.7915861 ]
+    [ 0.39885509  0.39885509  0.91726512  0.91726512]
+    [ 0.39885509  0.39885509  0.91726512  0.91726512]]
+
+   [[ 0.86814755  0.86814755  0.90733343  0.90733343]
+    [ 0.86814755  0.86814755  0.90733343  0.90733343]
+    [ 0.34470171  0.34470171  0.03056507  0.03056507]
+    [ 0.34470171  0.34470171  0.03056507  0.03056507]]
+
+   [[ 0.86814755  0.86814755  0.90733343  0.90733343]
+    [ 0.86814755  0.86814755  0.90733343  0.90733343]
+    [ 0.34470171  0.34470171  0.03056507  0.03056507]
+    [ 0.34470171  0.34470171  0.03056507  0.03056507]]]
+
+
+  [[[ 0.62367481  0.62367481  0.20093997  0.20093997]
+    [ 0.62367481  0.62367481  0.20093997  0.20093997]
+    [ 0.57614893  0.57614893  0.7544235   0.7544235 ]
+    [ 0.57614893  0.57614893  0.7544235   0.7544235 ]]
+
+   [[ 0.62367481  0.62367481  0.20093997  0.20093997]
+    [ 0.62367481  0.62367481  0.20093997  0.20093997]
+    [ 0.57614893  0.57614893  0.7544235   0.7544235 ]
+    [ 0.57614893  0.57614893  0.7544235   0.7544235 ]]
+
+   [[ 0.52572423  0.52572423  0.04730832  0.04730832]
+    [ 0.52572423  0.52572423  0.04730832  0.04730832]
+    [ 0.74973559  0.74973559  0.2245238   0.2245238 ]
+    [ 0.74973559  0.74973559  0.2245238   0.2245238 ]]
+
+   [[ 0.52572423  0.52572423  0.04730832  0.04730832]
+    [ 0.52572423  0.52572423  0.04730832  0.04730832]
+    [ 0.74973559  0.74973559  0.2245238   0.2245238 ]
+    [ 0.74973559  0.74973559  0.2245238   0.2245238 ]]]]]
+```
+
+---
+## UpSampling2D ##
+
+**Scala:**
+```scala
+val module = UpSampling2D(size: Array[Int], format: DataFormat = DataFormat.NCHW)
+```
+**Python:**
+```python
+m = UpSampling2D(size, data_format)
+```
+UpSampling layer for 2D inputs. 
+Repeats the heights and widths of the data by size[0] and size[1] respectively. 
+
+If input's dataformat is NCHW, then the size of output will be (N, C, H * size[0], W * size[1]). 
+
+Detailed parameter explanation for the constructor. 
+ * `size` tuple of 2 integers. The upsampling factors for heights and widths.
+ * `data_format` a string value (or DataFormat Object in Scala) of "NHWC" or "NCHW" to specify the input data format of this layer. In "NHWC" format
+                        data is stored in the order of \[batch_size, height, width, channels\], in "NCHW" format data is stored
+                        in the order of \[batch_size, channels, height, width\].
+
+**Scala example:** 
+
+```scala
+import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric.NumericFloat
+import com.intel.analytics.bigdl.nn._
+import com.intel.analytics.bigdl.tensor._
+import com.intel.analytics.bigdl.utils.T
+
+val module = UpSampling2D(Array(2, 3))
+val input = Tensor(2, 2, 3, 3).range(1, 36)
+module.forward(input)
+```
+The output should be 
+```scala
+res: com.intel.analytics.bigdl.tensor.Tensor[Float] =
+(1,1,.,.) =
+1.0	1.0	1.0	2.0	2.0	2.0	3.0	3.0	3.0
+1.0	1.0	1.0	2.0	2.0	2.0	3.0	3.0	3.0
+4.0	4.0	4.0	5.0	5.0	5.0	6.0	6.0	6.0
+4.0	4.0	4.0	5.0	5.0	5.0	6.0	6.0	6.0
+7.0	7.0	7.0	8.0	8.0	8.0	9.0	9.0	9.0
+7.0	7.0	7.0	8.0	8.0	8.0	9.0	9.0	9.0
+
+(1,2,.,.) =
+10.0	10.0	10.0	11.0	11.0	11.0	12.0	12.0	12.0
+10.0	10.0	10.0	11.0	11.0	11.0	12.0	12.0	12.0
+13.0	13.0	13.0	14.0	14.0	14.0	15.0	15.0	15.0
+13.0	13.0	13.0	14.0	14.0	14.0	15.0	15.0	15.0
+16.0	16.0	16.0	17.0	17.0	17.0	18.0	18.0	18.0
+16.0	16.0	16.0	17.0	17.0	17.0	18.0	18.0	18.0
+
+(2,1,.,.) =
+19.0	19.0	19.0	20.0	20.0	20.0	21.0	21.0	21.0
+19.0	19.0	19.0	20.0	20.0	20.0	21.0	21.0	21.0
+22.0	22.0	22.0	23.0	23.0	23.0	24.0	24.0	24.0
+22.0	22.0	22.0	23.0	23.0	23.0	24.0	24.0	24.0
+25.0	25.0	25.0	26.0	26.0	26.0	27.0	27....
+```
+
+
+**Python example:**
+```python
+from bigdl.nn.layer import *
+import numpy as np
+
+module = UpSampling2D([2, 3])
+input = np.arange(1, 37).reshape(2, 2, 3, 3)
+module.forward(input)
+```
+The output is 
+```python
+array([[[[  1.,   1.,   1.,   2.,   2.,   2.,   3.,   3.,   3.],
+         [  1.,   1.,   1.,   2.,   2.,   2.,   3.,   3.,   3.],
+         [  4.,   4.,   4.,   5.,   5.,   5.,   6.,   6.,   6.],
+         [  4.,   4.,   4.,   5.,   5.,   5.,   6.,   6.,   6.],
+         [  7.,   7.,   7.,   8.,   8.,   8.,   9.,   9.,   9.],
+         [  7.,   7.,   7.,   8.,   8.,   8.,   9.,   9.,   9.]],
+
+        [[ 10.,  10.,  10.,  11.,  11.,  11.,  12.,  12.,  12.],
+         [ 10.,  10.,  10.,  11.,  11.,  11.,  12.,  12.,  12.],
+         [ 13.,  13.,  13.,  14.,  14.,  14.,  15.,  15.,  15.],
+         [ 13.,  13.,  13.,  14.,  14.,  14.,  15.,  15.,  15.],
+         [ 16.,  16.,  16.,  17.,  17.,  17.,  18.,  18.,  18.],
+         [ 16.,  16.,  16.,  17.,  17.,  17.,  18.,  18.,  18.]]],
+
+
+       [[[ 19.,  19.,  19.,  20.,  20.,  20.,  21.,  21.,  21.],
+         [ 19.,  19.,  19.,  20.,  20.,  20.,  21.,  21.,  21.],
+         [ 22.,  22.,  22.,  23.,  23.,  23.,  24.,  24.,  24.],
+         [ 22.,  22.,  22.,  23.,  23.,  23.,  24.,  24.,  24.],
+         [ 25.,  25.,  25.,  26.,  26.,  26.,  27.,  27.,  27.],
+         [ 25.,  25.,  25.,  26.,  26.,  26.,  27.,  27.,  27.]],
+
+        [[ 28.,  28.,  28.,  29.,  29.,  29.,  30.,  30.,  30.],
+         [ 28.,  28.,  28.,  29.,  29.,  29.,  30.,  30.,  30.],
+         [ 31.,  31.,  31.,  32.,  32.,  32.,  33.,  33.,  33.],
+         [ 31.,  31.,  31.,  32.,  32.,  32.,  33.,  33.,  33.],
+         [ 34.,  34.,  34.,  35.,  35.,  35.,  36.,  36.,  36.],
+         [ 34.,  34.,  34.,  35.,  35.,  35.,  36.,  36.,  36.]]]], dtype=float32)
+```
+
+---
+## UpSampling3D ##
+
+**Scala:**
+```scala
+val module = UpSampling3D(size: Array[Int])
+```
+**Python:**
+```python
+m = UpSampling3D(size)
+```
+
+UpSampling3D is a module that upsamples for 3D inputs.
+It repeats the 1st, 2nd and 3rd dimensions of the data by size[0], size[1] and size[2] respectively.
+The input data is assumed to be of the form ```minibatch x channels x depth x height x width```.
+
+**Scala example:**
+```scala
+
+scala>
+import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric.NumericFloat
+import com.intel.analytics.bigdl.nn._
+import com.intel.analytics.bigdl.tensor._
+import com.intel.analytics.bigdl.tensor.Storage
+
+val module = UpSampling3D(Array(2, 2, 2))
+val input = Tensor(1, 2, 2, 2, 2).randn()
+val output = module.forward(input)
+
+> input
+(1,1,1,.,.) =
+0.8626614	-0.25849837
+0.89711547	0.41256216
+
+(1,1,2,.,.) =
+0.031144595	0.28527617
+0.36917794	-0.9892453
+
+(1,2,1,.,.) =
+-1.7768023	-0.39210165
+1.9640301	-2.2383325
+
+(1,2,2,.,.) =
+0.41984457	-1.1820035
+0.23327439	-0.17730176
+
+[com.intel.analytics.bigdl.tensor.DenseTensor of size 1x2x2x2x2]
+
+> output
+(1,1,1,.,.) =
+0.8626614	0.8626614	-0.25849837	-0.25849837
+0.8626614	0.8626614	-0.25849837	-0.25849837
+0.89711547	0.89711547	0.41256216	0.41256216
+0.89711547	0.89711547	0.41256216	0.41256216
+
+(1,1,2,.,.) =
+0.8626614	0.8626614	-0.25849837	-0.25849837
+0.8626614	0.8626614	-0.25849837	-0.25849837
+0.89711547	0.89711547	0.41256216	0.41256216
+0.89711547	0.89711547	0.41256216	0.41256216
+
+(1,1,3,.,.) =
+0.031144595	0.031144595	0.28527617	0.28527617
+0.031144595	0.031144595	0.28527617	0.28527617
+0.36917794	0.36917794	-0.9892453	-0.9892453
+0.36917794	0.36917794	-0.9892453	-0.9892453
+
+(1,1,4,.,.) =
+0.031144595	0.031144595	0.28527617	0.28527617
+0.031144595	0.031144595	0.28527617	0.28527617
+0.36917794	0.36917794	-0.9892453	-0.9892453
+0.36917794	0.36917794	-0.9892453	-0.9892453
+
+(1,2,1,.,.) =
+-1.7768023	-1.7768023	-0.39210165	-0.39210165
+-1.7768023	-1.7768023	-0.39210165	-0.39210165
+1.9640301	1.9640301	-2.2383325	-2.2383325
+1.9640301	1.9640301	-2.2383325	-2.2383325
+
+(1,2,2,.,.) =
+-1.7768023	-1.7768023	-0.39210165	-0.39210165
+-1.7768023	-1.7768023	-0.39210165	-0.39210165
+1.9640301	1.9640301	-2.2383325	-2.2383325
+1.9640301	1.9640301	-2.2383325	-2.2383325
+
+(1,2,3,.,.) =
+0.41984457	0.41984457	-1.1820035	-1.1820035
+0.41984457	0.41984457	-1.1820035	-1.1820035
+0.23327439	0.23327439	-0.17730176	-0.17730176
+0.23327439	0.23327439	-0.17730176	-0.17730176
+
+(1,2,4,.,.) =
+0.41984457	0.41984457	-1.1820035	-1.1820035
+0.41984457	0.41984457	-1.1820035	-1.1820035
+0.23327439	0.23327439	-0.17730176	-0.17730176
+0.23327439	0.23327439	-0.17730176	-0.17730176
+
+[com.intel.analytics.bigdl.tensor.DenseTensor of size 1x2x4x4x4]
+
+```
+
+---
+## ResizeBilinear ##
+
+**Scala:**
+```scala
+val module = ResizeBilinear(outputHeight, outputWidth,
+                      alignCorners=false, dataFormat = DataFormat.NCHW)
+```
+**Python:**
+```python
+m = ResizeBilinear(outputHeight, outputWidth,
+               alignCorners=False, dataFormat="NCHW")
+```
+
+Resize the input image with bilinear interpolation. The input image must be a float tensor with
+NHWC or NCHW layout.
+ 
+**Scala example:**
+```scala
+
+scala>
+import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric.NumericFloat
+import com.intel.analytics.bigdl.nn._
+import com.intel.analytics.bigdl.tensor._
+
+val module = ResizeBilinear(4, 4)
+val input = Tensor(1, 1, 2, 2).range(1, 4)
+val output = module.forward(input)
+
+> output
+(1,1,.,.) =
+1.0	1.5	2.0	2.0	
+2.0	2.5	3.0	3.0	
+3.0	3.5	4.0	4.0	
+3.0	3.5	4.0	4.0	
+
+[com.intel.analytics.bigdl.tensor.DenseTensor$mcF$sp of size 1x1x4x4]
+
+```
+
+**Python example:**
+```python
+from bigdl.nn.layer import *
+import numpy as np
+
+module = ResizeBilinear(4, 4)
+input = np.arange(1, 5).reshape(1, 1, 2, 2)
+output = module.forward(input)
+print output
+```
+The output is 
+```python
+[[[[ 1.   1.5  2.   2. ]
+   [ 2.   2.5  3.   3. ]
+   [ 3.   3.5  4.   4. ]
+   [ 3.   3.5  4.   4. ]]]]
+```

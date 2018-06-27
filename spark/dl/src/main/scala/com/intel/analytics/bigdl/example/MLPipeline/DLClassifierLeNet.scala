@@ -18,6 +18,7 @@ package com.intel.analytics.bigdl.example.MLPipeline
 import com.intel.analytics.bigdl._
 import com.intel.analytics.bigdl.dataset.image.{BytesToGreyImg, GreyImgNormalizer, GreyImgToBatch}
 import com.intel.analytics.bigdl.dataset.{DataSet, DistributedDataSet, MiniBatch, _}
+import com.intel.analytics.bigdl.dlframes.DLClassifier
 import com.intel.analytics.bigdl.models.lenet.LeNet5
 import com.intel.analytics.bigdl.models.lenet.Utils._
 import com.intel.analytics.bigdl.nn.ClassNLLCriterion
@@ -26,7 +27,6 @@ import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric.NumericF
 import com.intel.analytics.bigdl.utils.{Engine, LoggerFilter}
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.SparkContext
-import org.apache.spark.ml.{DLClassifier, DLModel}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SQLContext
 
@@ -71,6 +71,7 @@ object DLClassifierLeNet {
         .setFeaturesCol(inputs(0))
         .setLabelCol(inputs(1))
         .setBatchSize(param.batchSize)
+        .setMaxEpoch(param.maxEpoch)
       val transformer = estimator.fit(trainingDF)
 
       val validationSet = DataSet.array(load(validationData, validationLabel), sc) ->

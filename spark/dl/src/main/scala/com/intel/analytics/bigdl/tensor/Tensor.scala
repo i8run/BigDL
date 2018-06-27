@@ -25,6 +25,7 @@ import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
 import com.intel.analytics.bigdl.utils.{File, Table}
 import org.apache.spark.mllib.linalg.{DenseMatrix, DenseVector, Matrix, Vector}
 
+import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
@@ -350,6 +351,15 @@ trait Tensor[T] extends Serializable with TensorMath[T] with Activity {
   }
 
   /**
+   * Get a new tensor with same storage.
+   *
+   * @return new tensor
+   */
+  def shallowClone(): Tensor[T] = {
+    this
+  }
+
+  /**
    * return a new empty tensor of the same type
    *
    * @return new tensor
@@ -585,6 +595,15 @@ trait Tensor[T] extends Serializable with TensorMath[T] with Activity {
   def view(sizes: Array[Int]): Tensor[T]
 
   /**
+   * Count the number of non-zero elements in first dimension.
+   * For SparseTensor only.
+   * @return an array number of non-zero elements in first dimension.
+   */
+  def numNonZeroByRow(): Array[Int] = {
+    throw new UnsupportedOperationException("countNonZero for sparse tensor only")
+  }
+
+  /**
  *
  * Returns a tensor which contains all slices of size @param size
    * in the dimension @param dim. Step between two slices is given by @param step.
@@ -763,6 +782,30 @@ trait Tensor[T] extends Serializable with TensorMath[T] with Activity {
     })
     return result
   }
+
+  /**
+   * Convert 1D tensor to an array. If the tensor is not 1D, an exception will be thrown out.
+   * @return
+   */
+  def toArray(): Array[T]
+
+  /**
+   * Element wise inequality between tensor and given value
+   * @param value
+   * @return
+   */
+  def notEqualValue(value : Double): Boolean = {
+    var j = 0
+    while (j < this.nElement()) {
+      if (this.storage.apply(j + this.storageOffset() - 1) != value) {
+        return true
+      }
+      j += 1
+    }
+    return false
+  }
+
+  private[bigdl] def toQuantizedTensor: QuantizedTensor[T]
 }
 
 /**
@@ -785,6 +828,7 @@ object LongType extends TensorDataType
 object FloatType extends TensorDataType
 
 object DoubleType extends TensorDataType
+
 sealed trait TensorType
 
 object DenseType extends TensorType
@@ -930,7 +974,15 @@ object Tensor {
    */
   def apply[@specialized(Float, Double) T: ClassTag](data: Array[T],
     shape: Array[Int])(implicit ev: TensorNumeric[T]): Tensor[T] = {
-    new DenseTensor[T]().set(Storage[T](data), storageOffset = 1, sizes = shape)
+    if (shape.product != data.length) {
+      require(data.length == 1, "shape total size doesn't match data length")
+      // Here we create a repeat tensor
+      val strides = new Array[Int](shape.length)
+      new DenseTensor[T]().set(Storage[T](data), storageOffset = 1, sizes = shape,
+        strides = strides)
+    } else {
+      new DenseTensor[T]().set(Storage[T](data), storageOffset = 1, sizes = shape)
+    }
   }
 
   /**
@@ -1273,5 +1325,58 @@ object Tensor {
         tensors: Seq[Tensor[T]],
         res: Tensor[T])(implicit ev: TensorNumeric[T]): Tensor[T] = {
     SparseTensor.concat(dim, tensors, res)
+  }
+
+  /**
+   * Find the distinct value and its indices in a 1D tensor.
+   * @param tensor a 1D tensor
+   * @param distinctBuffer a buffer for its distinct values.
+   * @param indicesBuffer a buffer for its indcies.
+   * @return (distinctValues, indices)
+   */
+  def unique[T: ClassTag](
+        tensor: Tensor[T],
+        distinctBuffer: Tensor[T] = null,
+        indicesBuffer: Tensor[Int] = null
+        )(implicit ev: TensorNumeric[T]): (Tensor[T], Tensor[Int]) = {
+    require(tensor.isContiguous(), "unique only support contiguous tensor")
+    require(tensor.dim() == 1, "unique only support 1D tensor")
+    val array = tensor.storage().array()
+    val arrayOffset = tensor.storageOffset() - 1
+
+    val distinctTensor = if (null != distinctBuffer) {
+      distinctBuffer.resizeAs(tensor)
+      distinctBuffer
+    } else {
+      Tensor().resizeAs(tensor)
+    }
+    val tensorIndices = if (null != indicesBuffer) {
+      indicesBuffer.resizeAs(tensor)
+      indicesBuffer
+    } else {
+      Tensor[Int]().resizeAs(tensor)
+    }
+
+    val distinctValues = distinctTensor.storage().array()
+    val distinctValuesOffset = distinctTensor.storageOffset() - 1
+    val indicesArray = tensorIndices.storage().array()
+    val indicesOffset = tensorIndices.storageOffset() - 1
+    val seen = mutable.HashMap[T, Int]()
+    var i = 0
+    var nonZero = 0
+    while (i < tensor.nElement()) {
+      val x = array(i + arrayOffset)
+      if (!seen.contains(x)) {
+        distinctValues(nonZero + distinctValuesOffset) = x
+        seen.put(x, nonZero)
+        nonZero += 1
+      }
+      indicesArray(i + indicesOffset) = seen(x)
+      i += 1
+    }
+    // Resize distinctTensor to number of non-zero elements.
+    distinctTensor.resize(nonZero)
+
+    (distinctTensor, tensorIndices)
   }
 }

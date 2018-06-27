@@ -13,11 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.intel.analytics.bigdl.tensor
 
 import org.scalatest.{FlatSpec, Matchers}
 import com.intel.analytics.bigdl.numeric.NumericFloat
+import com.intel.analytics.bigdl.utils.RandomGenerator
+
+import scala.util.Random
 
 @com.intel.analytics.bigdl.tags.Parallel
 class SparseTensorSpec  extends FlatSpec with Matchers {
@@ -97,6 +99,76 @@ class SparseTensorSpec  extends FlatSpec with Matchers {
     sTensor.nElement() should be (30)
     sTensor.storage().array.length should be (30)
     sTensor.storageOffset() should be (1)
+  }
+
+  "resize tensor to higher dim when nElement < sum(size)" should "return right result" in {
+    val indices = Array(Array(0, 4, 5, 7, 9))
+    val values = Array.fill(5)(Random.nextFloat())
+    val sTensor = Tensor.sparse(indices, values, Array(10))
+    sTensor.resize(Array(1, 10), 5)
+    Tensor.dense(sTensor).squeeze().toArray().sum should be (values.sum)
+  }
+
+  "resize narrowed tensor" should "return right result" in {
+    val sTensor = Tensor.sparse(Tensor(30).range(1, 30, 1)).narrow(1, 6, 18)
+    sTensor.resize(Array(6, 3), 18)
+    sTensor.size() should be (Array(6, 3))
+    sTensor.nElement() should be (18)
+    sTensor.storage().array.length should be (30)
+    sTensor.storageOffset() should be (6)
+  }
+
+  "Tensor.dense narrowed tensor" should "return right result" in {
+    val values = Array.fill(30)(Random.nextFloat())
+    val sTensor = Tensor.sparse(Tensor(values, Array(6, 5)))
+    val narrowed = sTensor.narrow(1, 2, 4)
+    val narrowedSum = values.slice(5, 25).sum
+    Tensor.dense(narrowed).resize(20).toArray().sum shouldEqual narrowedSum
+  }
+
+  "SparseTensor dot DenseTense" should "return right result" in {
+    val rng = RandomGenerator.RNG
+    rng.setSeed(10)
+    val values = Array.fill(30)(rng.normal(1.0, 1.0).toFloat)
+    val sTensor = Tensor.sparse(Tensor(values, Array(6, 5)))
+
+    val dTensor = Tensor(Array(6, 5)).rand()
+
+    val sparseResult = sTensor.dot(dTensor)
+    val denseResult = dTensor.dot(Tensor.dense(sTensor))
+
+    sparseResult should be (denseResult +- 1e-6f)
+  }
+
+  "Diagonal SparseTensor dot DenseTense" should "return right result" in {
+    val sTensor = Tensor.sparse(
+      indices = Array(Array(0, 1, 2, 3), Array(0, 1, 2, 3)),
+      values = Array[Float](2f, 4f, 6f, 8f), shape = Array(4, 4))
+
+    val dTensor = Tensor(Array(4, 4)).fill(1.0f)
+
+    val sparseResult = sTensor.dot(dTensor)
+
+    sparseResult should be (20f +- 1e-6f)
+  }
+
+  "SparseTensor.applyFun" should "work correctly" in {
+    val func = (a: Float) => a.round * 2
+    val srcTensor = Tensor.sparse(Tensor(3, 4).randn())
+    val dstTensor = Tensor.sparse[Int](Array(3, 4), 12)
+    dstTensor.applyFun(srcTensor, func)
+    dstTensor.storage().array() shouldEqual
+      srcTensor.storage().array().map(func)
+  }
+
+  "Tensor.cast" should "work on SparseTensor" in {
+    val sTensor = Tensor.sparse(Tensor[Int](6, 5).rand())
+    val sTensor2 = Tensor.sparse[Int](Tensor[Int](6, 5).rand())
+    sTensor.cast(sTensor2)
+    sTensor.storage().array() shouldEqual sTensor2.storage().array()
+
+    val sTensor1 = sTensor.cast(sTensor.asInstanceOf[Tensor[Long]])
+    sTensor1.storage() shouldEqual sTensor.storage()
   }
 
 }

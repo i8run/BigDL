@@ -18,39 +18,41 @@ package com.intel.analytics.bigdl.utils.tf.loaders
 import java.nio.ByteOrder
 
 import com.intel.analytics.bigdl.Module
-import com.intel.analytics.bigdl.nn.Reshape
+import com.intel.analytics.bigdl.nn.{Reshape => ReshapeOps}
+import com.intel.analytics.bigdl.nn.abstractnn.{AbstractModule, Activity}
 import com.intel.analytics.bigdl.tensor.Tensor
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
-import com.intel.analytics.bigdl.utils.tf.{Context, TFUtils}
+import com.intel.analytics.bigdl.utils.tf.Context
 import org.tensorflow.framework.NodeDef
 
 import scala.reflect.ClassTag
 
 class Reshape extends TensorflowOpsLoader {
-
-  import Utils._
-
   override def build[T: ClassTag](nodeDef: NodeDef, byteOrder: ByteOrder,
     context: Context[T])(implicit ev: TensorNumeric[T]): Module[T] = {
-    Adapter[T](Array(2), tensorArrays => {
-      val sizes = tensorArrays(0).asInstanceOf[Tensor[Int]]
+    new ReshapeLoadTF[T]()
+  }
+}
 
-      val batchMode = if (sizes.nDimension() >= 1) {
-        sizes.valueAt(1) == -1
-      } else {
-        false
-      }
+class ReshapeLoadTF[T: ClassTag]()(implicit ev: TensorNumeric[T]) extends Adapter[T](Array(2)) {
+  override def build(tensorArrays: Array[Tensor[_]]): AbstractModule[Activity, Activity, T] = {
+    val sizes = tensorArrays(0).asInstanceOf[Tensor[Int]]
 
-      val arraySize = new Array[Int](if (batchMode) sizes.nElement() - 1 else sizes.nElement())
-      var i = if (batchMode) 2 else 1
-      var k = 0
-      while(i <= sizes.nElement()) {
-        arraySize(k) = sizes.valueAt(i)
-        k += 1
-        i += 1
-      }
-      Reshape[T](size = arraySize, Some(batchMode))
-    })
+    val batchMode = if (sizes.nDimension() >= 1 && sizes.nElement() > 0) {
+      sizes.valueAt(1) == -1
+    } else {
+      false
+    }
+
+    val arraySize = new Array[Int](if (batchMode) sizes.nElement() - 1 else sizes.nElement())
+    var i = if (batchMode) 2 else 1
+    var k = 0
+    while(i <= sizes.nElement()) {
+      arraySize(k) = sizes.valueAt(i)
+      k += 1
+      i += 1
+    }
+    ReshapeOps[T](size = arraySize, Some(batchMode))
   }
 }
 

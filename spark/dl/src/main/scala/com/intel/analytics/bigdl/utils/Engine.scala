@@ -16,14 +16,17 @@
 
 package com.intel.analytics.bigdl.utils
 
-import java.io.InputStream
+import java.io.{FileOutputStream, InputStream, PrintWriter}
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
 import org.apache.log4j.Logger
-import org.apache.spark.{SparkConf, SparkContext}
-
+import org.apache.spark._
 import com.intel.analytics.bigdl.mkl.MKL
+import org.apache.spark.utils.SparkUtils
+import py4j.GatewayServer
+
+import scala.util.control.{ControlThrowable, NonFatal}
 
 /**
  * define engine type trait
@@ -35,14 +38,14 @@ case object MklBlas extends EngineType
 
 object Engine {
   @deprecated(
-    "See https://github.com/intel-analytics/BigDL/wiki/Programming-Guide#engine",
+    "See https://bigdl-project.github.io/master/#APIGuide/Engine/",
     "0.1.0")
   def init(nExecutor: Int,
            executorCores: Int,
            onSpark: Boolean): Option[SparkConf] = {
     logger.warn("Engine.init(nExecutor, executorCores, onSpark) is deprecated. " +
       "Please refer to " +
-      "https://github.com/intel-analytics/BigDL/wiki/Programming-Guide#engine")
+      "https://bigdl-project.github.io/master/#APIGuide/Engine/")
     setNodeAndCore(nExecutor, executorCores)
     val res = if (onSpark) {
       require(localMode == false,
@@ -110,6 +113,83 @@ object Engine {
   private var physicalCoreNumber = -1
   private var nodeNum: Int = -1
 
+  @volatile
+  private var gatewayServer: py4j.GatewayServer = null
+  private val driverPortFileCreated = new AtomicBoolean()
+
+  private def createGatewayPortFile(port: Int): Unit = {
+    val file = new java.io.File(SparkFiles.getRootDirectory(), "gateway_port")
+    logger.debug(s"Creating JavaGatewayServer port file" +
+      s" on executor-${SparkEnv.get.executorId}:${file.getAbsolutePath}")
+    if (file.exists()) {
+      file.delete()
+    }
+    file.createNewFile()
+    val out = new PrintWriter(file)
+    try {
+      out.print(port)
+      out.flush()
+    } finally {
+      out.close()
+    }
+  }
+
+  private[bigdl] def createJavaGateway(driverPort: Int): Unit = {
+    if (SparkUtils.isDriver) {
+      if (driverPortFileCreated.compareAndSet(false, true)) {
+        try {
+          createGatewayPortFile(driverPort)
+        } catch {
+          case NonFatal(e) =>
+            throw new Exception("Could not create java gateway port file", e)
+        }
+      }
+      return
+    }
+    if (gatewayServer != null) return
+    this.synchronized {
+      if (gatewayServer != null) return
+      gatewayServer = new py4j.GatewayServer(null, 0)
+    }
+
+    logger.info(s"Initializing JavaGatewayServer on executor-${SparkEnv.get.executorId} ")
+    GatewayServer.turnLoggingOn()
+    val thread = new Thread(new Runnable() {
+      override def run(): Unit = try {
+        gatewayServer.start()
+      } catch {
+        case ct: ControlThrowable =>
+          throw ct
+        case t: Throwable =>
+          throw new Exception(s"Uncaught exception " +
+            s"in thread ${Thread.currentThread().getName}, when staring JavaGatewayServer", t)
+      }
+    })
+    thread.setName("py4j-executor-gateway-init")
+    thread.setDaemon(true)
+    thread.start()
+
+    thread.join()
+
+    logger.info(s"JavaGatewayServer initialized")
+
+    Runtime.getRuntime().addShutdownHook(new Thread {
+      override def run(): Unit = {
+        gatewayServer.shutdown()
+      }
+    })
+
+    try {
+      createGatewayPortFile(gatewayServer.getListeningPort)
+    } catch {
+      case NonFatal(e) =>
+        throw new Exception("Could not create java gateway port file", e)
+    }
+  }
+
+
+
+
   private[bigdl] def localMode: Boolean = {
     System.getProperty("bigdl.localMode", "false").toLowerCase(Locale.ROOT) match {
       case "true" => true
@@ -120,10 +200,10 @@ object Engine {
 
   private val NOT_INIT_ERROR =
     "Do you call Engine.init? See more at " +
-      "https://github.com/intel-analytics/BigDL/wiki/Programming-Guide#engine"
+      "https://bigdl-project.github.io/master/#APIGuide/Engine/"
 
   private val SPARK_CONF_ERROR = "For details please check " +
-    "https://github.com/intel-analytics/BigDL/wiki/Programming-Guide#engine"
+    "https://bigdl-project.github.io/master/#APIGuide/Engine/"
 
   /**
    * Notice: Please use property bigdl.engineType to set engineType.
@@ -140,7 +220,7 @@ object Engine {
   @volatile private var _default: ThreadPool = null
 
   // Thread pool for layer use
-  @volatile private var _model: ThreadPool = new ThreadPool(1).setMKLThread(MKL.getNumThreads)
+  @volatile private var _model: ThreadPool = new ThreadPool(1).setMKLThread(MKL.getMklNumThreads)
 
   /**
    * If user undefine the property bigdl.coreNumber, it will return physical core number
@@ -154,9 +234,11 @@ object Engine {
   }
 
   private def getNumMachineCores: Int = {
+    val coreNum = Runtime.getRuntime().availableProcessors()
+    require(coreNum > 0, "Get a non-positive core number")
     // We assume the HT is enabled
     // Todo: check the Hyper threading
-    Runtime.getRuntime().availableProcessors() / 2
+    if (coreNum > 1) coreNum / 2 else 1
   }
 
   /**
@@ -253,7 +335,7 @@ object Engine {
 
     if(_model == null || _model.getPoolSize != modelPoolSize) {
       _model = new ThreadPool(modelPoolSize)
-      _model.setMKLThread(MKL.getNumThreads)
+      _model.setMKLThread(MKL.getMklNumThreads)
     }
   }
 
@@ -342,7 +424,17 @@ object Engine {
    * @return (nExecutor, executorCore)
    */
   private[utils] def sparkExecutorAndCore(): Option[(Int, Int)] = {
-    parseExecutorAndCore(SparkContext.getOrCreate().getConf)
+    try {
+      parseExecutorAndCore(SparkContext.getOrCreate().getConf)
+    } catch {
+      case s: SparkException =>
+        if (s.getMessage.contains("A master URL must be set in your configuration")) {
+          throw new IllegalArgumentException("A master URL must be set in your configuration." +
+            " Or if you want to run BigDL in a local JVM environment, you should set Java " +
+            "property bigdl.localMode=true")
+        }
+        throw s
+    }
   }
 
   /**
@@ -405,6 +497,23 @@ object Engine {
         val maxString = conf.get("spark.cores.max", null)
         require(maxString != null, "Engine.init: Can't find total core number" +
           ". Do you submit with --total-executor-cores")
+        val total = maxString.toInt
+        require(total >= core && total % core == 0, s"Engine.init: total core " +
+          s"number($total) can't be divided " +
+          s"by single core number($core) provided to spark-submit")
+        total / core
+      }
+      Some(nodeNum, core)
+    } else if (master.toLowerCase.startsWith("k8s")) {
+      // Spark-on-kubernetes mode
+      val coreString = conf.get("spark.executor.cores", null)
+      val maxString = conf.get("spark.cores.max", null)
+      require(coreString != null, "Engine.init: Can't find executor core number" +
+        ", do you submit with --conf spark.executor.cores option")
+      require(maxString != null, "Engine.init: Can't find total core number" +
+        ". Do you submit with --conf spark.cores.max option")
+      val core = coreString.toInt
+      val nodeNum = dynamicAllocationExecutor(conf).getOrElse {
         val total = maxString.toInt
         require(total >= core && total % core == 0, s"Engine.init: total core " +
           s"number($total) can't be divided " +

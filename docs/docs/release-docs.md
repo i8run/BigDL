@@ -1,8 +1,14 @@
+## **Release 0.5.0**
+
+[BigDL 0.5.0 Docs](https://bigdl-project.github.io/0.5.0)
 
 ---
-## **Latest Master**
+## **Release 0.4.0**
+[BigDL 0.4.0 Docs](https://bigdl-project.github.io/0.4.0)
 
-[Master Docs](https://bigdl-project.github.io/master)
+---
+## **Release 0.3.0**
+[BigDL 0.3.0 Docs](https://bigdl-project.github.io/0.3.0)
 
 ---
 ## **Release 0.2.0**

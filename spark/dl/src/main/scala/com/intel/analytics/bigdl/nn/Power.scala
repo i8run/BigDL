@@ -16,7 +16,7 @@
 
 package com.intel.analytics.bigdl.nn
 
-import com.intel.analytics.bigdl.nn.abstractnn.TensorModule
+import com.intel.analytics.bigdl.nn.abstractnn.{AbstractModule, TensorModule}
 import com.intel.analytics.bigdl.tensor.Tensor
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
 
@@ -37,7 +37,8 @@ class Power[T: ClassTag](
   val power: Double,
   val scale : Double = 1,
   val shift : Double = 0)
-(implicit ev: TensorNumeric[T]) extends TensorModule[T] {
+(implicit ev: TensorNumeric[T])
+  extends TensorModule[T] {
 
   val diffScale = power * scale
 
@@ -108,7 +109,7 @@ object Power {
   def apply[@specialized(Float, Double) T: ClassTag](
       power: Double,
       scale : Double = 1,
-      shift : Double = 0)(implicit ev: TensorNumeric[T]) : Power[T] = {
+      shift : Double = 0)(implicit ev: TensorNumeric[T]): Power[T] = {
     new Power[T](power, scale, shift)
   }
 }

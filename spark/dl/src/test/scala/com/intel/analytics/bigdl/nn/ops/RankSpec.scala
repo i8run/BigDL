@@ -17,7 +17,10 @@ package com.intel.analytics.bigdl.nn.ops
 
 import com.intel.analytics.bigdl.tensor.Tensor
 import com.intel.analytics.bigdl.utils.T
+import com.intel.analytics.bigdl.utils.serializer.ModuleSerializationTest
 import org.scalatest.{FlatSpec, Matchers}
+
+import scala.util.Random
 
 class RankSpec extends FlatSpec with Matchers {
   "Rank Float operation" should "works correctly" in {
@@ -26,7 +29,7 @@ class RankSpec extends FlatSpec with Matchers {
 
     val expectOutput = Tensor.scalar(1)
 
-    val output = Rank[Int]().forward(input)
+    val output = Rank[Float]().forward(input)
     output should be(expectOutput)
   }
 
@@ -36,7 +39,7 @@ class RankSpec extends FlatSpec with Matchers {
 
     val expectOutput = Tensor.scalar(1)
 
-    val output = Rank[Int]().forward(input)
+    val output = Rank[Float]().forward(input)
     output should be(expectOutput)
   }
 
@@ -46,7 +49,7 @@ class RankSpec extends FlatSpec with Matchers {
 
     val expectOutput = Tensor.scalar(1)
 
-    val output = Rank[Int]().forward(input)
+    val output = Rank[Float]().forward(input)
     output should be(expectOutput)
   }
 
@@ -56,7 +59,7 @@ class RankSpec extends FlatSpec with Matchers {
 
     val expectOutput = Tensor.scalar(1)
 
-    val output = Rank[Int]().forward(input)
+    val output = Rank[Float]().forward(input)
     output should be(expectOutput)
   }
 
@@ -66,7 +69,7 @@ class RankSpec extends FlatSpec with Matchers {
 
     val expectOutput = Tensor.scalar(1)
 
-    val output = Rank[Int]().forward(input)
+    val output = Rank[Float]().forward(input)
     output should be(expectOutput)
   }
 
@@ -76,7 +79,7 @@ class RankSpec extends FlatSpec with Matchers {
 
     val expectOutput = Tensor.scalar(1)
 
-    val output = Rank[Int]().forward(input)
+    val output = Rank[Float]().forward(input)
     output should be(expectOutput)
   }
 
@@ -86,7 +89,7 @@ class RankSpec extends FlatSpec with Matchers {
 
     val expectOutput = Tensor.scalar(1)
 
-    val output = Rank[Int]().forward(input)
+    val output = Rank[Float]().forward(input)
     output should be(expectOutput)
   }
 
@@ -96,7 +99,16 @@ class RankSpec extends FlatSpec with Matchers {
 
     val expectOutput = Tensor.scalar(1)
 
-    val output = Rank[Int]().forward(input)
+    val output = Rank[Float]().forward(input)
     output should be(expectOutput)
+  }
+}
+
+class RankSerialTest extends ModuleSerializationTest {
+  override def test(): Unit = {
+    val rank = Rank[Float].setName("rank")
+    val input = Tensor[Float](3, 3).apply1(_ => Random.nextFloat())
+    runSerializationTest(rank, input, rank.
+      asInstanceOf[ModuleToOperation[Float]].module.getClass)
   }
 }

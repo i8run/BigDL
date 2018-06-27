@@ -176,6 +176,41 @@ class LocalOptimizerSpec extends FlatSpec with Matchers with BeforeAndAfter{
     }
   }
 
+  it should "not train model with duplicate layers" in {
+    val m = Sequential[Float]()
+    val l1 = Linear[Float](2, 3)
+    val l2 = Identity[Float]()
+    val c = Sequential[Float]()
+    m.add(l1).add(c)
+    c.add(l1).add(l2)
+
+    intercept[IllegalArgumentException] {
+      val optimizer = new LocalOptimizer(
+        m,
+        creDataSet,
+        ClassNLLCriterion[Float]()
+      )
+    }
+  }
+
+  it should "not set model with duplicate layers" in {
+    val m = Sequential[Float]()
+    val l1 = Linear[Float](2, 3)
+    val l2 = Identity[Float]()
+    val c = Sequential[Float]()
+    m.add(l1).add(c)
+    c.add(l1).add(l2)
+
+    val optimizer = new LocalOptimizer(
+      c,
+      creDataSet,
+      ClassNLLCriterion[Float]()
+    )
+    intercept[IllegalArgumentException] {
+      optimizer.setModel(m)
+    }
+  }
+
   "Train model with CrossEntropy and SGD" should "be good" in {
     RandomGenerator.RNG.setSeed(1000)
     val optimizer = new LocalOptimizer[Float](
@@ -322,6 +357,7 @@ class LocalOptimizerSpec extends FlatSpec with Matchers with BeforeAndAfter{
       mseDataSet,
       new MSECriterion[Float].asInstanceOf[Criterion[Float]]
     ).setOptimMethod(new LBFGS[Float]())
+    optimizer.setValidation(Trigger.everyEpoch, mseDataSet, Array(new Top1Accuracy[Float]()))
     val model = optimizer.optimize()
     val weight = model.getParameters()._1
 

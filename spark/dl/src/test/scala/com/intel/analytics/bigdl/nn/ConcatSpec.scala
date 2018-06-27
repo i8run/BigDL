@@ -17,7 +17,11 @@
 package com.intel.analytics.bigdl.nn
 
 import com.intel.analytics.bigdl.tensor.{Storage, Tensor}
+import com.intel.analytics.bigdl.utils.LayerException
+import com.intel.analytics.bigdl.utils.serializer.ModuleSerializationTest
 import org.scalatest.{FlatSpec, Matchers}
+
+import scala.util.Random
 
 @com.intel.analytics.bigdl.tags.Parallel
 class ConcatSpec extends FlatSpec with Matchers {
@@ -72,5 +76,27 @@ class ConcatSpec extends FlatSpec with Matchers {
     val expectedGradInput = Tensor[Float](2, 2, 2, 2).apply1(_ => 5f)
     output should be (expectedOutput)
     gradInput should be (expectedGradInput)
+  }
+
+  "Concat with incorrec input" should "throw expected exception" in {
+    val model = Concat[Float](2)
+    model.add(Reshape[Float](Array(5, 2)))
+    model.add(Reshape[Float](Array(2, 5)))
+    val input = Tensor[Float](10)
+    val caught = intercept[LayerException] {
+      model.forward(input)
+    }
+    val contains = caught.error.getMessage.contains("output size at dimension 1 mismatch")
+    contains should be (true)
+  }
+}
+
+class ConcatSerialTest extends ModuleSerializationTest {
+  override def test(): Unit = {
+    val input = Tensor[Float](2, 2, 2).apply1(e => Random.nextFloat())
+    val concat = Concat[Float](2).setName("concat")
+    concat.add(Abs[Float]())
+    concat.add(Abs[Float]())
+    runSerializationTest(concat, input)
   }
 }

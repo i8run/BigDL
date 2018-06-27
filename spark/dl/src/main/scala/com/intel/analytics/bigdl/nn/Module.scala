@@ -39,7 +39,8 @@ object Module {
    * @tparam T numeric type
    * @return model loaded from path
    */
-  @deprecated("Java based serialization not recommended any more, please use loadModule instead")
+  @deprecated("Java based serialization not recommended any more, please use loadModule instead",
+    "0.3")
   def load[T: ClassTag](path : String) : AbstractModule[Activity, Activity, T] = {
     File.load[AbstractModule[Activity, Activity, T]](path)
   }
@@ -50,19 +51,21 @@ object Module {
    * @param path path to save module, local file system, HDFS and Amazon S3 is supported.
    *             HDFS path should be like "hdfs://[host]:[port]/xxx"
    *             Amazon S3 path should be like "s3a://bucket/xxx"
+   * @param weightPath : where weight is stored
    * @tparam T numeric type
    * @return model loaded from path
    */
-  def loadModule[T: ClassTag](path : String)(implicit ev: TensorNumeric[T])
+  def loadModule[T: ClassTag](path : String,
+    weightPath : String = null)(implicit ev: TensorNumeric[T])
   : AbstractModule[Activity, Activity, T] = {
-    ModuleLoader.loadFromFile(path)
+    ModuleLoader.loadFromFile(path, weightPath)
   }
 
   def loadTorch[T: ClassTag](path : String) : AbstractModule[Activity, Activity, T] = {
     File.loadTorch[AbstractModule[Activity, Activity, T]](path)
   }
 
-  @deprecated
+  @deprecated("Please try to use the loadCaffeModel API", "0.2")
   def loadCaffe[T: ClassTag](model: AbstractModule[Activity, Activity, T],
     defPath: String, modelPath: String, matchAll: Boolean = true)(
     implicit ev: TensorNumeric[T]): AbstractModule[Activity, Activity, T] = {
@@ -85,14 +88,14 @@ object Module {
    * @param outputs output node names, the output tensor order is same with the node order
    * @param byteOrder byte order in the tensorflow file. The default value is little endian
    * @param binFile where is the model variable file
+   * @param generatedBackward if generate backward graph
    * @return BigDL model
    */
   def loadTF[T: ClassTag](graphFile: String, inputs: Seq[String], outputs: Seq[String],
-            byteOrder: ByteOrder = ByteOrder.LITTLE_ENDIAN,
-            binFile: Option[String] = None)(
-    implicit ev: TensorNumeric[T]): Module[T] = {
-
-    TensorflowLoader.load(graphFile, inputs, outputs, byteOrder, binFile)
+        byteOrder: ByteOrder = ByteOrder.LITTLE_ENDIAN,
+        binFile: Option[String] = None, generatedBackward: Boolean = true)(
+        implicit ev: TensorNumeric[T]): Module[T] = {
+    TensorflowLoader.load(graphFile, inputs, outputs, byteOrder, binFile, generatedBackward)
   }
 
   /**
@@ -137,27 +140,28 @@ object Module {
     result
   }
 
-  def isCompact[@specialized(Float, Double) T: ClassTag](paramters: Array[Tensor[T]])(
+  def isCompact[@specialized(Float, Double) T: ClassTag](parameters: Array[Tensor[T]])(
     implicit ev: TensorNumeric[T]): Tensor[T] = {
-    require(paramters.length > 0,
+    require(parameters.length > 0,
       "The length of paramters should >= 0" +
       "parameter length" +
-        s" ${paramters.length}")
+        s" ${parameters.length}")
     var i = 1
-    val storage = paramters(0).storage()
-    var length = paramters(0).nElement()
-    while (i < paramters.length) {
-      if (!storage.eq(paramters(i).storage())) {
+    val storage = parameters(0).storage()
+    var length = parameters(0).nElement()
+    val offset = parameters(0).storageOffset()
+    // make sure parameters is shared and contiguous
+    while (i < parameters.length) {
+      if (!storage.eq(parameters(i).storage())) {
         return null
       }
-      length += paramters(i).nElement()
+      if (offset + length != parameters(i).storageOffset()) {
+        return null
+      }
+      length += parameters(i).nElement()
       i += 1
     }
 
-    if (length != storage.array().length) {
-      return null
-    }
-
-    return Tensor(storage)
+    Tensor(storage, offset, Array(length))
   }
 }

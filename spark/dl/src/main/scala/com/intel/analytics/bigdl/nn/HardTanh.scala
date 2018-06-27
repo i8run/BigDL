@@ -15,7 +15,7 @@
  */
 package com.intel.analytics.bigdl.nn
 
-import com.intel.analytics.bigdl.nn.abstractnn.TensorModule
+import com.intel.analytics.bigdl.nn.abstractnn.{AbstractModule, TensorModule}
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
 import com.intel.analytics.bigdl.tensor._
 import com.intel.analytics.bigdl.utils.Engine
@@ -200,7 +200,8 @@ object HardTanh {
   def apply[@specialized(Float, Double) T: ClassTag](
       minValue: Double = -1,
       maxValue: Double = 1,
-      inplace: Boolean = false)(implicit ev: TensorNumeric[T]) : HardTanh[T] = {
+      inplace: Boolean = false)
+      (implicit ev: TensorNumeric[T]): HardTanh[T] = {
     new HardTanh[T](minValue, maxValue, inplace)
   }
 }

@@ -45,7 +45,7 @@ private[bigdl] class QuantizedTensor[T: ClassTag](
   }
 
   def release(): this.type = {
-    if (desc != 0) {
+    if (desc != 0 && StorageManager.checkAndSet(desc)) {
       BigQuant.FreeMemory(desc)
     }
     desc = 0L
@@ -260,7 +260,7 @@ private[bigdl] class QuantizedTensor[T: ClassTag](
       sumOfRow = new Array[T](length)
       System.arraycopy(quantizedTensor.sumOfRow, 0, sumOfRow, 0, length)
 
-      new QuantizedTensor[T](internalStorage, size(), maxOfRow, minOfRow, sumOfRow, params)
+      this.desc = Desc.get(params, internalStorage, 0, this.maxOfRow, this.minOfRow)
     } else {
       throw new UnsupportedOperationException(s"can't set from other type of tensor.")
     }
@@ -269,6 +269,8 @@ private[bigdl] class QuantizedTensor[T: ClassTag](
   }
 
   override def getTensorNumeric(): TensorNumeric[T] = ev
+
+  override def toQuantizedTensor: QuantizedTensor[T] = this.asInstanceOf[QuantizedTensor[T]]
 
   @throws(classOf[IOException])
   private def readObject(in: ObjectInputStream): Unit = {

@@ -15,7 +15,7 @@
 #
 
 from optparse import OptionParser
-from bigdl.dataset import mnist
+from bigdl.models.lenet.utils import *
 from bigdl.dataset.transformer import *
 from bigdl.nn.layer import *
 from bigdl.nn.criterion import *
@@ -29,8 +29,8 @@ def build_model(class_num):
     model.add(SpatialConvolution(1, 6, 5, 5))
     model.add(Tanh())
     model.add(SpatialMaxPooling(2, 2, 2, 2))
-    model.add(Tanh())
     model.add(SpatialConvolution(6, 12, 5, 5))
+    model.add(Tanh())
     model.add(SpatialMaxPooling(2, 2, 2, 2))
     model.add(Reshape([12 * 4 * 4]))
     model.add(Linear(12 * 4 * 4, 100))
@@ -38,23 +38,6 @@ def build_model(class_num):
     model.add(Linear(100, class_num))
     model.add(LogSoftMax())
     return model
-
-
-def get_mnist(sc, data_type="train", location="/tmp/mnist"):
-    """
-    Get and normalize the mnist data. We would download it automatically
-    if the data doesn't present at the specific location.
-
-    :param sc: SparkContext
-    :param data_type: training data or testing data
-    :param location: Location storing the mnist
-    :return: A RDD of (features: Ndarray, label: Ndarray)
-    """
-    (images, labels) = mnist.read_data_sets(location, data_type)
-    images = sc.parallelize(images)
-    labels = sc.parallelize(labels + 1) # Target start from 1 in BigDL
-    record = images.zip(labels)
-    return record
 
 
 if __name__ == "__main__":
@@ -65,6 +48,7 @@ if __name__ == "__main__":
     parser.add_option("-c", "--checkpointPath", dest="checkpointPath", default="/tmp/lenet5")
     parser.add_option("-t", "--endTriggerType", dest="endTriggerType", default="epoch")
     parser.add_option("-n", "--endTriggerNum", type=int, dest="endTriggerNum", default="20")
+    parser.add_option("-d", "--dataPath", dest="dataPath", default="/tmp/mnist")
 
     (options, args) = parser.parse_args(sys.argv)
 
@@ -74,40 +58,24 @@ if __name__ == "__main__":
     init_engine()
 
     if options.action == "train":
-        def get_end_trigger():
-            if options.endTriggerType.lower() == "epoch":
-                return MaxEpoch(options.endTriggerNum)
-            else:
-                return MaxIteration(options.endTriggerNum)
+        (train_data, test_data) = preprocess_mnist(sc, options)
 
-        train_data = get_mnist(sc, "train")\
-            .map(lambda rec_tuple: (normalizer(rec_tuple[0], mnist.TRAIN_MEAN, mnist.TRAIN_STD),
-                               rec_tuple[1]))\
-            .map(lambda t: Sample.from_ndarray(t[0], t[1]))
-        test_data = get_mnist(sc, "test")\
-            .map(lambda rec_tuple: (normalizer(rec_tuple[0], mnist.TEST_MEAN, mnist.TEST_STD),
-                               rec_tuple[1]))\
-            .map(lambda t: Sample.from_ndarray(t[0], t[1]))
         optimizer = Optimizer(
             model=build_model(10),
             training_rdd=train_data,
             criterion=ClassNLLCriterion(),
             optim_method=SGD(learningrate=0.01, learningrate_decay=0.0002),
-            end_trigger=get_end_trigger(),
+            end_trigger=get_end_trigger(options),
             batch_size=options.batchSize)
-        optimizer.set_validation(
-            batch_size=options.batchSize,
-            val_rdd=test_data,
-            trigger=EveryEpoch(),
-            val_method=[Top1Accuracy()]
-        )
-        optimizer.set_checkpoint(EveryEpoch(), options.checkpointPath)
+        validate_optimizer(optimizer, test_data, options)
         trained_model = optimizer.optimize()
         parameters = trained_model.parameters()
     elif options.action == "test":
         # Load a pre-trained model and then validate it through top1 accuracy.
-        test_data = get_mnist(sc, "test").map(
-            normalizer(mnist.TEST_MEAN, mnist.TEST_STD))
+        test_data = get_mnist(sc, "test", options.dataPath) \
+            .map(lambda rec_tuple: (normalizer(rec_tuple[0], mnist.TEST_MEAN, mnist.TEST_STD),
+                                    rec_tuple[1])) \
+            .map(lambda t: Sample.from_ndarray(t[0], t[1]))
         model = Model.load(options.modelPath)
         results = model.evaluate(test_data, options.batchSize, [Top1Accuracy()])
         for result in results:

@@ -4,6 +4,7 @@ extra_css: [extra.css]
 theme_dir: mkdocs_windmill 
 repo_name: 'Fork on GitHub '
 repo_url: 'https://github.com/intel-analytics/BigDL'
+google_analytics: ['UA-60548202-2', 'bigdl-project.github.io']
 extra:
     version: latest
     article_nav_top: false
@@ -11,7 +12,9 @@ extra:
 
 
 pages:
-- Overview: index.md 
+- Overview: 
+  - ReadMe: index.md
+  - White Paper: whitepaper.md
 - Releases: 
   - Download: release-download.md 
   - Documentation: release-docs.md
@@ -20,6 +23,7 @@ pages:
   - Install: 
     - Use Pre-built Libs: ScalaUserGuide/install-pre-built.md
     - Build from Source Code: ScalaUserGuide/install-build-src.md 
+    - Build BigDL-core: ScalaUserGuide/build-bigdl-core.md 
   - Run: ScalaUserGuide/run.md
   - Configuration: ScalaUserGuide/configuration.md
   - Examples: ScalaUserGuide/examples.md
@@ -31,6 +35,7 @@ pages:
   - Run:
     - After pip install: PythonUserGuide/run-from-pip.md
     - Without pip install: PythonUserGuide/run-without-pip.md
+    - FAQ: PythonUserGuide/python-faq.md
   - Examples: PythonUserGuide/python-examples.md
   - More Examples and Tutorials: PythonUserGuide/python-resources.md
 - Programming Guide:
@@ -42,12 +47,21 @@ pages:
   - Visualization: ProgrammingGuide/visualization.md
   - Run on Amazon EC2: ProgrammingGuide/run-on-ec2.md
   - Run on Google Cloud Dataproc: ProgrammingGuide/run-on-dataproc.md
+  - Run on Kubernetes: ProgrammingGuide/run-on-k8s.md
   - Tensorflow Support: ProgrammingGuide/tensorflow-support.md
   - Caffe Support: ProgrammingGuide/caffe-support.md
+  - Keras Support: ProgrammingGuide/keras-support.md
+  - Quantization Support: ProgrammingGuide/quantization-support.md
+  - Define Customized Layer/Criterion:
+    - Define New Layer/Criterion: ProgrammingGuide/add-layer-criterion.md
+    - Implement Customized Serializer: ProgrammingGuide/Model/Serialization.md
+  - Build Image Application: ProgrammingGuide/image-support.md
 - API Guide:
+  - Engine: APIGuide/Engine.md
   - Data: APIGuide/Data.md
+  - Transformer: APIGuide/Transformer.md
   - Model: APIGuide/Module.md
-  - Layers: 
+  - Layers:
     - Containers:  APIGuide/Layers/Containers.md
     - Simple Layers: APIGuide/Layers/Simple-Layers.md
     - Convolution Layers: APIGuide/Layers/Convolution-Layers.md
@@ -62,6 +76,7 @@ pages:
     - Distance Layers: APIGuide/Layers/Distance-Layers.md
     - Recurrent Layers:  APIGuide/Layers/Recurrent-Layers.md
     - Recursive Layers:  APIGuide/Layers/Recursive-Layers.md
+    - Sparse Layers:  APIGuide/Layers/Sparse-Layers.md
     - Utilities: APIGuide/Layers/Utilities.md
   - Losses: APIGuide/Losses.md
   - Initalizers: APIGuide/Initializers.md
@@ -70,11 +85,35 @@ pages:
   - Optim Methods:
     - OptimMethod: APIGuide/Optimizers/OptimMethod.md 
     - Optimization Algorithms: APIGuide/Optimizers/Optim-Methods.md
+    - LearningRate Scheduler: APIGuide/Optimizers/Learningrate-Scheduler.md
   - Triggers: APIGuide/Triggers.md
   - Metrics:  APIGuide/Metrics.md
+  - ML Pipeline: APIGuide/DLFrames/DLEstimator_DLClassifier.md
+  - Supported Caffe Layers: APIGuide/caffe_layer_list.md
+  - Supported Tensorflow Operations: APIGuide/tensorflow_ops_list.md
+  - Keras Issues: APIGuide/keras-issues.md
   - Full API docs:
     - Scala Docs: APIGuide/scaladoc.md
     - Python API Docs: APIGuide/python-api-doc.md
+- Keras-Style API Guide:
+  - Python Guide: KerasStyleAPIGuide/keras-api-python.md
+  - Scala Guide: KerasStyleAPIGuide/keras-api-scala.md
+  - Layers:
+    - Activation: KerasStyleAPIGuide/Layers/activation.md
+    - Initialization: KerasStyleAPIGuide/Layers/initialization.md
+    - Core Layers: KerasStyleAPIGuide/Layers/core.md
+    - Convolutional Layers: KerasStyleAPIGuide/Layers/convolutional.md
+    - Pooling Layers: KerasStyleAPIGuide/Layers/pooling.md
+    - Recurrent Layers: KerasStyleAPIGuide/Layers/recurrent.md
+    - Normalization Layers: KerasStyleAPIGuide/Layers/normalization.md
+    - Embedding Layers: KerasStyleAPIGuide/Layers/embedding.md
+    - Dropout Layers: KerasStyleAPIGuide/Layers/dropout.md
+    - Advanced Activations: KerasStyleAPIGuide/Layers/advanced-activation.md
+    - Layer Wrappers: KerasStyleAPIGuide/Layers/wrappers.md
+  - Optimization:
+    - Train, evaluate or predict a model: KerasStyleAPIGuide/Optimization/training.md
+    - Optimizers: KerasStyleAPIGuide/Optimization/optimizer.md
+    - Losses: KerasStyleAPIGuide/Optimization/loss.md
 - Powered by: powered-by.md
 - Known Issues: known-issues.md
 - Presentations: presentations.md

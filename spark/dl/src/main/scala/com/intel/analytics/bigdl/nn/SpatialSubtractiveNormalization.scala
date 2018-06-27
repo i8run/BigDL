@@ -21,7 +21,8 @@ import com.intel.analytics.bigdl.tensor.Tensor
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
 import com.intel.analytics.bigdl.utils.T
 import com.intel.analytics.bigdl.utils.serializer._
-import serialization.Bigdl.{AttrValue, BigDLModule}
+import com.intel.analytics.bigdl.utils.serializer.converters.DataConverter
+import com.intel.analytics.bigdl.serialization.Bigdl.{AttrValue, BigDLModule}
 
 import scala.reflect.ClassTag
 
@@ -115,20 +116,20 @@ class SpatialSubtractiveNormalization[T: ClassTag](
       if (dim == 4) {
         // batch mode
         ones.resizeAs(input(1)).fill(ev.fromType[Int](1))
-        val _coef = meanestimator.updateOutput(ones).toTensor[T]
+        val _coef = meanestimator.forward(ones).toTensor[T]
         val size = Array(input.size(1)) ++ _coef.size()
         coef = coef.resizeAs(_coef).copy(_coef).view(Array(1) ++ _coef.size()).expand(size)
       } else {
         ones.resizeAs(input).fill(ev.fromType[Int](1))
-        val _coef = meanestimator.updateOutput(ones).toTensor[T]
+        val _coef = meanestimator.forward(ones).toTensor[T]
         coef.resizeAs(_coef).copy(_coef)
       }
     }
 
     // compute mean
-    localsums = meanestimator.updateOutput(input).toTensor[T]
-    adjustedsums = divider.updateOutput(T(localsums, coef)).asInstanceOf[Tensor[T]]
-    output = subtractor.updateOutput(T(input, adjustedsums)).asInstanceOf[Tensor[T]]
+    localsums = meanestimator.forward(input).toTensor[T]
+    adjustedsums = divider.forward(T(localsums, coef)).asInstanceOf[Tensor[T]]
+    output = subtractor.forward(T(input, adjustedsums)).asInstanceOf[Tensor[T]]
 
     output
   }

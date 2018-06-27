@@ -21,6 +21,7 @@ import com.intel.analytics.bigdl.tensor._
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
 import com.intel.analytics.bigdl.utils.{T, Table}
 
+import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
 
@@ -619,32 +620,56 @@ class SparseMiniBatch[T: ClassTag](
     target
   }
 
+  private def initTensor(sample: Tensor[_]): Tensor[_] = sample match {
+    case s if s.getTensorType == SparseType =>
+      s.getType() match {
+        case tpe if tpe == BooleanType =>
+          Tensor.sparse[Boolean](Array(batchSize) ++ s.size())
+        case tpe if tpe == CharType =>
+          Tensor.sparse[Char](Array(batchSize) ++ s.size())
+        case tpe if tpe == StringType =>
+          Tensor.sparse[String](Array(batchSize) ++ s.size())
+        case tpe if tpe == IntType =>
+          Tensor.sparse[Int](Array(batchSize) ++ s.size())
+        case tpe if tpe == ShortType =>
+          Tensor.sparse[Short](Array(batchSize) ++ s.size())
+        case tpe if tpe == LongType =>
+          Tensor.sparse[Long](Array(batchSize) ++ s.size())
+        case tpe if tpe == FloatType =>
+          Tensor.sparse[Float](Array(batchSize) ++ s.size())
+        case tpe if tpe == DoubleType =>
+          Tensor.sparse[Double](Array(batchSize) ++ s.size())
+      }
+    case s if s.getTensorType == DenseType =>
+      s.getType() match {
+        case tpe if tpe == BooleanType =>
+          Tensor[Boolean](Array(batchSize) ++ s.size())
+        case tpe if tpe == CharType =>
+          Tensor[Char](Array(batchSize) ++ s.size())
+        case tpe if tpe == StringType =>
+          Tensor[String](Array(batchSize) ++ s.size())
+        case tpe if tpe == IntType =>
+          Tensor[Int](Array(batchSize) ++ s.size())
+        case tpe if tpe == ShortType =>
+          Tensor[Short](Array(batchSize) ++ s.size())
+        case tpe if tpe == LongType =>
+          Tensor[Long](Array(batchSize) ++ s.size())
+        case tpe if tpe == FloatType =>
+          Tensor[Float](Array(batchSize) ++ s.size())
+        case tpe if tpe == DoubleType =>
+          Tensor[Double](Array(batchSize) ++ s.size())
+      }
+    case s =>
+      throw new IllegalArgumentException(s"MiniBatchWithSparse: unsupported feature type " +
+        s"${s.getTensorType}")
+  }
+
   def init(features: Array[Tensor[T]], labels: Array[Tensor[T]]): Unit = {
-    var i = 0
-    while (i < inputData.length) {
-      val featureI = features(i)
-      inputData(i) = if (featureI.getTensorType == SparseType) {
-        Tensor.sparse[T](Array(batchSize) ++ featureI.size())
-      } else if (featureI.getTensorType == DenseType) {
-        Tensor[T](Array(batchSize) ++ featureI.size())
-      } else {
-        throw new IllegalArgumentException(s"MiniBatchWithSparse: unsupported feature type " +
-          s"${featureI.getTensorType}")
-      }
-      i += 1
+    features.zipWithIndex.foreach { case (feature, index) =>
+      inputData(index) = initTensor(feature).asInstanceOf[Tensor[T]]
     }
-    i = 0
-    while (i < targetData.length) {
-      val labelI = labels(i)
-      targetData(i) = if (labelI.getTensorType == SparseType) {
-        Tensor.sparse[T](Array(batchSize) ++ labelI.size())
-      } else if (labelI.getTensorType == DenseType) {
-        Tensor[T](Array(batchSize) ++ labelI.size())
-      } else {
-        throw new IllegalArgumentException(s"MiniBatchWithSparse: unsupported label type " +
-          s"${labelI.getTensorType}")
-      }
-      i += 1
+    labels.zipWithIndex.foreach { case (label, index) =>
+      targetData(index) = initTensor(label).asInstanceOf[Tensor[T]]
     }
   }
 
@@ -713,39 +738,23 @@ object SparseMiniBatch{
         dim: Int,
         tensors: Seq[Tensor[T]],
         result: Tensor[T])(implicit ev: TensorNumeric[T]): Tensor[T] = {
-    val size = tensors.head.size()
-    var i = 1
-    while (i < tensors.length) {
-      size(dim - 1) += tensors(i).size(dim)
-      i += 1
-    }
+    val tensorSize = tensors.head.size()
 
-    result.resize(size)
+    val (pre, next) = tensorSize.splitAt(dim - 1)
+    val size = ArrayBuffer[Int]()
+    size ++= pre
+    size += tensors.length
+    size ++= next
 
-    i = 0
-    var offset = 1
+    result.resize(size.toArray)
+
+    var i = 0
     while (i < tensors.length) {
       val current = tensors(i)
-      val target = result.narrow(dim, offset, current.size(dim))
+      val target = result.select(dim, i + 1)
 
-      if (target.isContiguous() || dim > 2) {
-        // Copy directly when target is Contiguous or dimension is larger than 2
-        // in which case the contiguous region in target tensor is fairly small in practice
-        target.copy(current)
-      } else {
-        // Divide target into contiguous frames when target isn't contiguous
-        var f = 1
-        while (f <= target.size(1)) {
-          val curFrame = target.select(1, f)
-          val outputFrame = current.select(1, f)
-          require(curFrame.isContiguous())
-          require(outputFrame.isContiguous())
-          curFrame.copy(outputFrame)
-          f += 1
-        }
-      }
+      target.copy(current)
 
-      offset += current.size(dim)
       i += 1
     }
     result
