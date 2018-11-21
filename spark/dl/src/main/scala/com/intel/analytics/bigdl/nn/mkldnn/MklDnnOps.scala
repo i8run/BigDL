@@ -30,7 +30,7 @@ private[mkldnn] object MklDnnOps {
   }
 
   def streamSubmit(loc: Long, block: Int, primitives: Array[Long], length: Int,
-                   memory_primitives: Array[Long], buffers: Array[Tensor[Float]]): Unit = {
+                   memory_primitives: Array[Long], buffers: Array[Tensor[_]]): Unit = {
     require(MklDnn.isLoaded, "mkldnn isn't loaded")
     require(memory_primitives.length == buffers.length)
 
@@ -42,7 +42,8 @@ private[mkldnn] object MklDnnOps {
             buffers(i).asInstanceOf[DnnTensor[Float]].storageAddress(), 0)
         } else {
           handle(i) = MklDnnOps.memorySetDataHandle(
-            memory_primitives(i), buffers(i), buffers(i).storageOffset() - 1)
+            memory_primitives(i), buffers(i).asInstanceOf[Tensor[Float]],
+            buffers(i).storageOffset() - 1)
         }
       }
     }
@@ -51,7 +52,7 @@ private[mkldnn] object MklDnnOps {
 
     for (i <- memory_primitives.indices) {
       if (handle(i) != 0L) {
-         MklDnnOps.memoryReleaseDataHandle(buffers(i), handle(i))
+         MklDnnOps.memoryReleaseDataHandle(buffers(i).asInstanceOf[Tensor[Float]], handle(i))
       }
     }
   }

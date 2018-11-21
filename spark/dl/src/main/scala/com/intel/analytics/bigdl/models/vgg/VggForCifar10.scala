@@ -230,6 +230,53 @@ object Vgg_16 {
 
     Graph(conv1, output)
   }
+
+  def fusionGraph(classNum: Int, hasDropout: Boolean = true): Module[Float] = {
+    val conv1_1 = SpatialConvolution(3, 64, 3, 3, 1, 1, 1, 1).setName("conv1_1").inputs()
+    val conv1_2 = SpatialConvolution(64, 64, 3, 3, 1, 1, 1, 1).setName("conv1_2").inputs(conv1_1)
+    val pool1 = SpatialMaxPooling(2, 2, 2, 2).setName("pool1").inputs(conv1_2)
+
+    val conv2_1 = SpatialConvolution(64, 128, 3, 3, 1, 1, 1, 1).setName("conv2_1").inputs(pool1)
+    val conv2_2 = SpatialConvolution(128, 128, 3, 3, 1, 1, 1, 1).setName("conv2_2").inputs(conv2_1)
+    val pool2 = SpatialMaxPooling(2, 2, 2, 2).setName("pool2").inputs(conv2_2)
+
+    val conv3_1 = SpatialConvolution(128, 256, 3, 3, 1, 1, 1, 1).setName("conv3_1").inputs(pool2)
+    val conv3_2 = SpatialConvolution(256, 256, 3, 3, 1, 1, 1, 1).setName("conv3_2").inputs(conv3_1)
+    val conv3_3 = SpatialConvolution(256, 256, 3, 3, 1, 1, 1, 1).setName("conv3_3").inputs(conv3_2)
+    val pool3 = SpatialMaxPooling(2, 2, 2, 2).setName("pool3").inputs(conv3_3)
+
+    val conv4_1 = SpatialConvolution(256, 512, 3, 3, 1, 1, 1, 1).setName("conv4_1").inputs(pool3)
+    val conv4_2 = SpatialConvolution(512, 512, 3, 3, 1, 1, 1, 1).setName("conv4_2").inputs(conv4_1)
+    val conv4_3 = SpatialConvolution(512, 512, 3, 3, 1, 1, 1, 1).setName("conv4_3").inputs(conv4_2)
+    val pool4 = SpatialMaxPooling(2, 2, 2, 2).setName("pool4").inputs(conv4_3)
+
+    val conv5_1 = SpatialConvolution(512, 512, 3, 3, 1, 1, 1, 1).setName("conv5_1").inputs(pool4)
+    val conv5_2 = SpatialConvolution(512, 512, 3, 3, 1, 1, 1, 1).setName("conv5_2").inputs(conv5_1)
+    val conv5_3 = SpatialConvolution(512, 512, 3, 3, 1, 1, 1, 1).setName("conv5_3").inputs(conv5_2)
+    val pool5 = SpatialMaxPooling(2, 2, 2, 2).setName("pool5").inputs(conv5_3)
+
+    val fc6 = Linear(512 * 7 * 7, 4096).
+      setInitMethod(Xavier, ConstInitMethod(0.1)).setName("fc6").inputs(pool5)
+    val relu6 = ReLU().setName("relu6").inputs(fc6)
+    val drop6 = if (hasDropout) {
+      Dropout(0.5).setName("drop6").inputs(relu6)
+    } else {
+      relu6
+    }
+    val fc7 = Linear(4096, 4096).
+      setInitMethod(Xavier, ConstInitMethod(0.1)).setName("fc7").inputs(drop6)
+    val relu7 = ReLU().setName("relu7").inputs(fc7)
+    val drop7 = if (hasDropout) {
+      Dropout(0.5).setName("drop7").inputs(relu7)
+    } else {
+      relu7
+    }
+    val fc8 = Linear(4096, classNum).
+      setInitMethod(Xavier, ConstInitMethod(0.1)).setName(("fc8")).inputs(drop7)
+
+    val output = LogSoftMax().inputs(fc8)
+    Graph(conv1_1, output)
+  }
 }
 
 object Vgg_19 {

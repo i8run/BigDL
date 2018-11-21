@@ -21,6 +21,7 @@ import java.nio.ByteOrder
 import com.intel.analytics.bigdl._
 import com.intel.analytics.bigdl.dataset.{LocalDataSet, MiniBatch, PaddingParam, Sample}
 import com.intel.analytics.bigdl.nn.Graph.ModuleNode
+import com.intel.analytics.bigdl.nn.mkldnn.{DnnGraph, MklDnnLayer}
 import com.intel.analytics.bigdl.nn.quantized.Quantization
 import com.intel.analytics.bigdl.nn.{Module, _}
 import com.intel.analytics.bigdl.optim._
@@ -36,6 +37,7 @@ import org.apache.commons.lang3.SerializationUtils
 import org.apache.spark.rdd.RDD
 
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
 /**
@@ -902,7 +904,21 @@ abstract class AbstractModule[A <: Activity: ClassTag, B <: Activity: ClassTag, 
    * @return
    */
   final def quantize(): Module[T] = {
-    Quantization.quantize(this)
+    val quantizedModel = if (this.isInstanceOf[nn.mkldnn.MklDnnContainer]) {
+      val m = this.cloneModule()
+        .asInstanceOf[nn.mkldnn.MklDnnContainer]
+        .setQuantizeFlag(true)
+      m.asInstanceOf[Module[T]]
+    } else if (this.isInstanceOf[DnnGraph]) {
+      val m = this.cloneModule()
+          .asInstanceOf[nn.mkldnn.DnnGraph]
+          .setQuantizeFlag(true)
+      m.asInstanceOf[Module[T]]
+    } else {
+      Quantization.quantize(this)
+    }
+
+    quantizedModel
   }
 
   // ================================= Internal APIs ===========================================
@@ -1181,5 +1197,43 @@ abstract class AbstractModule[A <: Activity: ClassTag, B <: Activity: ClassTag, 
       }
     }
   }
+
+  // this three variables are for mkldnn int8. because container maybe have more than 1 Tensor
+  // output, so use a mutable ArrayBuffer[Float] to handle the ConcatTable, Graph and so on
+  // mask == 0 means we use single scales, which will get the max of whole tensor (in/out).
+  // scalesOfInput will maintain the max value of input tensor
+  // scalesOfOutput will maintain the max value of output tensor
+  val scalesOfInput: Int8ScalesAndMask = new Int8ScalesAndMask(Int8ScalesAndMask.SINGLE_SCALE)
+  val scalesOfOutput: Int8ScalesAndMask = new Int8ScalesAndMask(Int8ScalesAndMask.SINGLE_SCALE)
+}
+
+class Int8ScalesAndMask(val mask: Int) extends Serializable {
+  private val _scales: ArrayBuffer[Array[Float]] = ArrayBuffer.empty[Array[Float]]
+
+  def scales: ArrayBuffer[Array[Float]] = _scales
+
+  def set(scales: Array[Array[Float]]): Unit = {
+    _scales.clear()
+    scales.foreach(append)
+  }
+
+  def append(scale: Array[Float]): Unit = {
+    _scales.append(scale)
+  }
+
+  def update(scale: Array[Float], index: Int): Unit = {
+    if (scales.length - 1 < index) {
+      scales.append(scale)
+    }
+
+    scales(index).indices.foreach(i =>
+      if (scale(i) > scales(index)(i)) {
+        scales(index)(i) = scale(i)
+      })
+  }
+}
+
+object Int8ScalesAndMask {
+  val SINGLE_SCALE = 0
 }
 

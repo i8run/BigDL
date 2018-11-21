@@ -19,7 +19,12 @@ package com.intel.analytics.bigdl.optim
 import com.intel.analytics.bigdl._
 import com.intel.analytics.bigdl.dataset.{Sample, SampleToMiniBatch}
 import com.intel.analytics.bigdl.models.utils.ModelBroadcast
+import com.intel.analytics.bigdl.nn.Module
+import com.intel.analytics.bigdl.nn.mkldnn.Phase.InferencePhase
+import com.intel.analytics.bigdl.nn.mkldnn.{DnnGraph, Sequential}
+import com.intel.analytics.bigdl.tensor.Tensor
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
+import com.intel.analytics.bigdl.utils.{Engine, MklDnn}
 import org.apache.spark.rdd.RDD
 
 import scala.reflect.ClassTag
@@ -45,9 +50,10 @@ class Evaluator[T: ClassTag] private[optim](model: Module[T])(implicit ev: Tenso
    * @param batchSize total batchsize
    * @return
    */
-  def test(dataset: RDD[Sample[T]],
+  def test(data: RDD[Sample[T]],
    vMethods: Array[ValidationMethod[T]],
    batchSize: Option[Int] = None): Array[(ValidationResult, ValidationMethod[T])] = {
+    val dataset = data.repartition(Engine.nodeNumber())
 
     val modelBroad = ModelBroadcast[T]().broadcast(dataset.sparkContext, model.evaluate())
     val partitionNum = dataset.partitions.length
@@ -57,10 +63,24 @@ class Evaluator[T: ClassTag] private[optim](model: Module[T])(implicit ev: Tenso
       batchSize = totalBatch, partitionNum = Some(partitionNum)))
 
     dataset.mapPartitions(partition => {
-      val localModel = modelBroad.value()
+      val model = modelBroad.value()
+
+      if (Engine.getEngineType() == MklDnn) {
+        Engine.setNodeAndCore(1, 1)
+      }
+
       val localMethod = otherBroad.value._1.map(_.clone())
       val localTransformer = otherBroad.value._2.cloneTransformer()
       val miniBatch = localTransformer(partition)
+
+      val localModel = model
+      if (model.isInstanceOf[Sequential]) {
+        model.asInstanceOf[Sequential].compile(InferencePhase)
+      } else if (model.isInstanceOf[DnnGraph]) {
+        model.asInstanceOf[DnnGraph].compile(InferencePhase)
+      }
+      println(localModel)
+
       miniBatch.map(batch => {
         val output = localModel.forward(batch.getInput())
         localMethod.map(validation => {

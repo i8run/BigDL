@@ -17,9 +17,11 @@
 package com.intel.analytics.bigdl.nn.mkldnn
 
 import com.intel.analytics.bigdl.mkl.{DataType, Memory}
-import com.intel.analytics.bigdl.nn.abstractnn.Activity
+import com.intel.analytics.bigdl.nn.abstractnn.{Activity, Int8ScalesAndMask}
 import com.intel.analytics.bigdl.nn.mkldnn.Phase.{InferencePhase, TrainingPhase}
 import com.intel.analytics.bigdl.tensor.{DnnTensor, FloatType, Tensor}
+
+import scala.collection.mutable.ArrayBuffer
 
 /**
  * `TensorMMap` contains two tensors, dense and native, which are a map of each other.
@@ -37,6 +39,9 @@ private[mkldnn] class TensorMMap(_size: Array[Int]) extends Serializable {
   def native[T]: DnnTensor[T] = {
     _native.asInstanceOf[DnnTensor[T]]
   }
+
+  var mask = 2
+  val scales = ArrayBuffer.empty[Float]
 
   // the native DnnTensor. It's allocate at runtime when do primitive initialization.
   // it has two benefits, the first is the clone will only clone one copy of weights and gradients
@@ -62,15 +67,15 @@ private[mkldnn] class TensorMMap(_size: Array[Int]) extends Serializable {
   }
 
   /**
-   * set the dense <-> native map, maintain the format to reorder
-   *
-   * Note, it will only create the native tensor based on the size and will not
-   * do the reorder. So you should call `sync()` by manual.
-   *
-   * @param from the source tensor memory data, could be HeapData or NativeData
-   * @param to the dest tensor memory data, could be HeapData or NativeData
-   * @param runtime the mkldnn runtime for reorder operation
-   */
+    * set the dense <-> native map, maintain the format to reorder
+    *
+    * Note, it will only create the native tensor based on the size and will not
+    * do the reorder. So you should call `sync()` by manual.
+    *
+    * @param from the source tensor memory data, could be HeapData or NativeData
+    * @param to the dest tensor memory data, could be HeapData or NativeData
+    * @param runtime the mkldnn runtime for reorder operation
+    */
   def setMemoryData(from: MemoryData, to: MemoryData, runtime: MklDnnRuntime): Unit = {
     require(_from == null && _to == null, "you only can set once the memory data")
     _from = from
@@ -92,6 +97,19 @@ private[mkldnn] class TensorMMap(_size: Array[Int]) extends Serializable {
         this._native.zero()
         _reorder.output.toTensor[Float].set(this.dense)
         _heapData = _to.asInstanceOf[HeapData]
+    }
+  }
+
+  def memoryData(): MemoryData = {
+    require(_heapData != null, "You should setMemoryData first")
+    _heapData
+  }
+
+  def isMemoryDataSet(): Boolean = {
+    if (_heapData == null) {
+      false
+    } else {
+      true
     }
   }
 
@@ -120,3 +138,4 @@ private[mkldnn] class TensorMMap(_size: Array[Int]) extends Serializable {
     }
   }
 }
+

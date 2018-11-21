@@ -18,7 +18,7 @@ package com.intel.analytics.bigdl.nn.mkldnn
 
 import com.intel.analytics.bigdl.mkl.Memory
 import com.intel.analytics.bigdl.nn
-import com.intel.analytics.bigdl.nn.mkldnn.Phase.TrainingPhase
+import com.intel.analytics.bigdl.nn.mkldnn.Phase.{InferencePhase, TrainingPhase}
 import com.intel.analytics.bigdl.numeric.NumericFloat
 import com.intel.analytics.bigdl.optim.L2Regularizer
 import com.intel.analytics.bigdl.tensor.{DnnStorage, Tensor}
@@ -468,6 +468,24 @@ class LinearSpec extends FlatSpec with Matchers {
     seq.forward(input2)
     seq.backward(input2, input)
   }
+
+//  "linear with int8" should "work correctly" in {
+//    val inputSize = 16
+//    val outputSize = 16
+//    val initWeight = Tensor[Float](outputSize, inputSize).rand(-1, 1)
+//    val initBias = Tensor[Float](outputSize)
+//
+//    val input = Tensor[Float](16, inputSize).rand()
+//
+//    val linear = Linear(outputSize, inputSize, initWeight = initWeight, initBias = initBias)
+//
+//    val seq = Sequential().add(Input(Array(16, inputSize), Memory.Format.nc)).add(linear)
+//      .add(ReorderMemory(HeapData(Array(16, outputSize), Memory.Format.nc)))
+//
+//    val quant = seq.quantize(Array(input))
+//
+//    quant.forward(input)
+//  }
 
 
   "linear " should "work correctly" in {

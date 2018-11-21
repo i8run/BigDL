@@ -18,7 +18,7 @@ package com.intel.analytics.bigdl.nn.mkldnn
 
 import com.intel.analytics.bigdl.mkl.Memory
 import com.intel.analytics.bigdl.nn
-import com.intel.analytics.bigdl.nn.mkldnn.Phase.TrainingPhase
+import com.intel.analytics.bigdl.nn.mkldnn.Phase.{InferencePhase, TrainingPhase}
 import com.intel.analytics.bigdl.numeric.NumericFloat
 import com.intel.analytics.bigdl.tensor.Tensor
 import com.intel.analytics.bigdl.utils.T
@@ -98,5 +98,20 @@ class ReLUSpec extends FlatSpec with Matchers {
     cloned.backward(input, gradOutput)
 
     Tools.dense(relu.gradInput) should be (Tools.dense(cloned.gradInput))
+  }
+
+  "relu with nc" should "work correctly" in {
+    val inputShape = Array(16, 512, 7, 7)
+    val shape = Array(16, 4096)
+    val model = Sequential()
+      .add(Input(inputShape, Memory.Format.nchw))
+      .add(Linear(512 * 7 * 7, 4096))
+      .add(ReLU())
+      .add(ReorderMemory(HeapData(shape, Memory.Format.nc)))
+
+    model.compile(InferencePhase)
+
+    val input = Tensor[Float](inputShape).rand(-1, 1)
+    model.forward(input)
   }
 }

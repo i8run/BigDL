@@ -42,7 +42,7 @@ object Utils {
     modelSnapshot: Option[String] = None,
     stateSnapshot: Option[String] = None,
     summaryPath: Option[String] = None,
-    batchSize: Int = 112,
+    batchSize: Int = 16,
     maxEpoch: Int = 90,
     overWriteCheckpoint: Boolean = false,
     learningRate: Double = 0.01,
@@ -120,7 +120,8 @@ object Utils {
   case class TestParams(
     folder: String = "./",
     model: String = "",
-    batchSize: Int = 112
+    batchSize: Int = 32,
+    quantize: Boolean = false
   )
 
   val testParser = new OptionParser[TestParams]("BigDL Vgg on Cifar10 Test Example") {
@@ -134,6 +135,9 @@ object Utils {
     opt[Int]('b', "batchSize")
       .text("batch size")
       .action((x, c) => c.copy(batchSize = x))
+    opt[Boolean]('q', "quantize")
+      .text("quantize the model")
+      .action((x, c) => c.copy(quantize = x))
   }
 
   private[bigdl] def loadTrain(dataFile: String): Array[ByteRecord] = {

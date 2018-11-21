@@ -69,7 +69,10 @@ class Linear(
     }
   }
 
+  @transient var needQuantize = false
+
   override private[mkldnn] def initFwdPrimitives(inputs: Array[MemoryData], phase: Phase) = {
+    needQuantize = false
     val (weightShape, weightLayout) = inputs(0).shape.length match {
       case 4 =>
         (Array(weight.size(1)) ++ inputs(0).shape.slice(1, 4),
@@ -86,18 +89,52 @@ class Linear(
     MklDnn.MemoryDescInit(inputShape.length, inputShape,
       DataType.F32, Memory.Format.any)
 
-    val src = NativeData(inputShape, Memory.Format.any)
-    val wei = NativeData(weightShape, Memory.Format.any)
-    val bis = NativeData(bias.size(), Memory.Format.x)
-    val dst = NativeData(outputShape, Memory.Format.any)
+    val inputDataType = if (needQuantize) DataType.U8 else DataType.F32
+    val weightDataType = if (needQuantize) DataType.S8 else DataType.F32
+    val biasDataType = if (needQuantize) DataType.S32 else DataType.F32
+    val outputDataType = if (needQuantize) DataType.S8 else DataType.F32
+
+    val src = NativeData(inputShape, Memory.Format.any, inputDataType)
+    val wei = NativeData(weightShape, Memory.Format.any, weightDataType)
+    val bis = NativeData(bias.size(), Memory.Format.x, biasDataType)
+    val dst = NativeData(outputShape, Memory.Format.any, outputDataType)
 
     val desc = MklDnn.LinearForwardDescInit(
-      PropKind.Forward,
+      PropKind.ForwardScoring,
       src.getMemoryDescription(),
       wei.getMemoryDescription(),
       bis.getMemoryDescription(),
       dst.getMemoryDescription())
-    forwardPrimDesc = MklDnn.PrimitiveDescCreate(desc, runtime.engine, 0)
+
+    forwardPrimDesc = if (needQuantize) {
+      val attr = MklDnn.CreateAttr()
+
+      // create output scales for s8/u8 output
+      if (_outputFormats != null) {
+        MklDnn.AttrSetIntOutputRoundMode(attr, 1)
+        _outputFormats(0).setMask(scalesOfOutput.mask)
+        _outputFormats(0).setScales(scalesOfOutput.scales(0))
+        _inputFormats(0).setMask(scalesOfInput.mask)
+        _inputFormats(0).setScales(scalesOfInput.scales(0))
+
+        require(_outputFormats(0).scales != null)
+        require(_outputFormats(0).scales.length == 1)
+        require(_inputFormats(0).scales != null && !_inputFormats(0).scales.isEmpty)
+        require(_inputFormats(0).scales.length == 1)
+        require(weight.memoryData().scales != null)
+
+        val scaleOut = _outputFormats(0).scales(0)
+        val scaleIn = _inputFormats(0).scales(0)
+        //        val scales = weight.memoryData().scales.map(w => scaleOut / (scaleIn * w))
+
+        val scales = weight.memoryData().scales.map(w => (scaleIn * w) / (scaleOut * 127))
+        MklDnn.AttrSetOutputScales(attr, scales.length, 2, scales)
+      }
+      MklDnn.PrimitiveDescCreateV2(desc, attr, runtime.engine, 0)
+      // TODO we should destroy these ops
+    } else {
+      MklDnn.PrimitiveDescCreate(desc, runtime.engine, 0)
+    }
 
     val List(realSrc, realWei, realDst) = List(Query.SrcPd, Query.WeightsPd, Query.DstPd).map {x =>
       MemoryData.operationWant(forwardPrimDesc, x)
@@ -106,8 +143,13 @@ class Linear(
     require(weight.size().product == realWei.shape.product,
       s"${getName} weight shape is not correct.")
 
-    weight.setMemoryData(HeapData(weightShape, weightLayout), realWei, runtime)
-    bias.setMemoryData(HeapData(bis.shape, Memory.Format.x), bis, runtime)
+    if (weight.isMemoryDataSet()) {
+      weight.setMemoryData(weight.heapData, realWei, runtime)
+      bias.setMemoryData(bias.heapData, bis, runtime)
+    } else {
+      weight.setMemoryData(HeapData(weightShape, weightLayout), realWei, runtime)
+      bias.setMemoryData(HeapData(bis.shape, Memory.Format.x), bis, runtime)
+    }
 
     weight.sync()
     bias.sync()
@@ -123,6 +165,20 @@ class Linear(
     updateOutputMemoryPrimitives = srcs ++ dsts
     updateOutputPrimitives = Array(primitive)
     output = initTensor(realDst)
+
+    updateOutputTensors = null
+
+    // quantize weight from fp32 to int8
+//    if (scalesOfInput.scales.nonEmpty) {
+//      realSrc.setMask(scalesOfInput.mask)
+//      realSrc.setScales(scalesOfInput.scales(0))
+//    }
+//
+//    if (scalesOfOutput.scales.nonEmpty) {
+//      realDst.setMask(scalesOfOutput.mask)
+//      realDst.setScales(scalesOfOutput.scales(0))
+//    }
+
 
     _inputFormats = Array(realSrc)
     _outputFormats = Array(realDst)
@@ -147,7 +203,7 @@ class Linear(
     }
 
     MklDnnOps.streamSubmit(runtime.stream, 1, updateOutputPrimitives, updateOutputPrimitives.length,
-      updateOutputMemoryPrimitives, updateOutputTensors)
+      updateOutputMemoryPrimitives, updateOutputTensors.asInstanceOf[Array[Tensor[_]]])
 
     output
   }
@@ -256,7 +312,8 @@ class Linear(
     updateWithNewTensor(updateGradInputTensors, 0, gradOutput)
 
     MklDnnOps.streamSubmit(runtime.stream, 1, updateGradInputPrimitives,
-      updateGradInputPrimitives.length, updateGradInputMemoryPrimitives, updateGradInputTensors)
+      updateGradInputPrimitives.length, updateGradInputMemoryPrimitives,
+      updateGradInputTensors.asInstanceOf[Array[Tensor[_]]])
 
     gradInput
   }
@@ -271,11 +328,12 @@ class Linear(
       updateGradWTensors = buffer.toArray
     }
 
-    updateWithNewTensor(updateGradInputTensors, 0, input)
-    updateWithNewTensor(updateGradInputTensors, 1, gradOutput)
+    updateWithNewTensor(updateGradWTensors, 0, input)
+    updateWithNewTensor(updateGradWTensors, 1, gradOutput)
 
     MklDnnOps.streamSubmit(runtime.stream, 1, accGradientPrimitives,
-      accGradientPrimitives.length, updateGradWMemoryPrimitives, updateGradWTensors)
+      accGradientPrimitives.length, updateGradWMemoryPrimitives,
+      updateGradWTensors.asInstanceOf[Array[Tensor[_]]])
 
     gradWeight.sync()
     gradBias.sync()
@@ -298,6 +356,57 @@ class Linear(
   override def release(): Unit = {
     super.release()
     List(weight, bias, gradWeight, gradBias).foreach(_.release())
+  }
+
+  private[bigdl] def updateWeightsScales(): Unit = {
+    require(weight.memoryData() != null)
+    require(bias.memoryData() != null)
+
+    def scalesOf(tensor: Tensor[Float], indexes: Array[Int]): Tensor[Float] = {
+      if (indexes.length == 1) {
+        tensor.max(indexes.head)._1
+      } else {
+        scalesOf(tensor.max(indexes.head)._1, indexes.drop(1))
+      }
+    }
+
+    {
+      // reorder the weights
+      val format = if (weight.size().length == 4) {
+        Memory.Format.oihw
+      } else {
+        Memory.Format.nc
+      }
+
+      val result = weight.dense
+
+      val (mask, scales) = weight.size().length match {
+        case 2 =>
+          val mask = math.pow(2, 0).toInt
+          val scales = scalesOf(result, Array(2)).storage().array().map(x => x)
+          (mask, scales)
+        case 4 =>
+          val mask = math.pow(2, 0).toInt
+          val scales = scalesOf(result, Array(2, 3, 4)).storage().array().map(x => x)
+          (mask, scales)
+        case _ =>
+          throw new UnsupportedOperationException
+      }
+
+      weight.memoryData().setMask(mask)
+      weight.memoryData().setScales(scales)
+    }
+
+    {
+      bias.memoryData().setMask(0)
+      bias.memoryData().setScales(Array(scalesOfOutput.scales(0)(0) * bias.dense.max()))
+    }
+
+    //    {
+    // FIXME at last, the output
+    //      val scales = inputFormats()(0).scales.zip(weight.memoryData().scales).map(x => x._1 * x._2)
+    //      outputFormats()(0).setScales(scales)
+    //    }
   }
 }
 

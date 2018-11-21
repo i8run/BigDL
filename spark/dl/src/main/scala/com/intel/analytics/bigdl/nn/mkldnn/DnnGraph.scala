@@ -481,6 +481,35 @@ class DnnGraph(
     )
     checkDuplicate()
   }
+
+  override def release(): Unit = {
+    modules.foreach(module => module.release())
+  }
+
+  override def generateInAndOutScales(input: Activity, inAndOutMask: Int): Unit = {
+    var i = 0
+    while(i < forwardExecution.length) {
+      val node = forwardExecution(i)
+      val nodeInput = if (skipPrimitiveId(i)) {
+        findInput(node, input)
+      } else {
+        findDnnInput(node, input)
+      }
+      if (node.element.isInstanceOf[MklDnnModule]) {
+        node.element.asInstanceOf[MklDnnModule].generateScalesWithMask(nodeInput, 0, 2)
+      }
+      i += 1
+    }
+  }
+
+  override def setQuantizeFlag(value: Boolean): DnnGraph.this.type = {
+    this.forwardExecution.foreach { node =>
+      if (node.element.isInstanceOf[MklDnnModule]) {
+        node.element.asInstanceOf[MklDnnModule].setQuantizeFlag(value)
+      }
+    }
+    this
+  }
 }
 
 object DnnGraph {

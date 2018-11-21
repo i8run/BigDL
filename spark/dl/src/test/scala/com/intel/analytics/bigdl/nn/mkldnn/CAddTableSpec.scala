@@ -15,8 +15,8 @@
  */
 package com.intel.analytics.bigdl.nn.mkldnn
 
-import com.intel.analytics.bigdl.mkl.Memory
-import com.intel.analytics.bigdl.nn.mkldnn.Phase.TrainingPhase
+import com.intel.analytics.bigdl.mkl.{DataType, Memory}
+import com.intel.analytics.bigdl.nn.mkldnn.Phase.{InferencePhase, TrainingPhase}
 import com.intel.analytics.bigdl.numeric.NumericFloat
 import com.intel.analytics.bigdl.tensor.{DnnTensor, Tensor}
 import com.intel.analytics.bigdl.utils.{BigDLSpecHelper, T}
@@ -93,5 +93,36 @@ class CAddTableSpec extends BigDLSpecHelper {
 
     Tools.dense(cat.gradInput.toTable(1)) should be (Tools.dense(cloned.gradInput.toTable(1)))
     Tools.dense(cat.gradInput.toTable(2)) should be (Tools.dense(cloned.gradInput.toTable(2)))
+  }
+
+  "CAddTable u8" should "be correct" in {
+    val shape = Array(4, 3, 5, 5)
+    val model = Sequential()
+    val concat = ConcatTable()
+    val cadd = CAddTable()
+
+    model.add(concat).add(cadd)
+
+    val input = Tensor[Float](shape).rand(0, 1)
+    val inputScales = input.clone().max(1)._1.max(3)._1.max(4)._1.storage().array()
+    val heapData = HeapData(shape, Memory.Format.nchw, DataType.F32)
+    heapData.setMask(2)
+    heapData.setScales(inputScales.map(x => 255f / x))
+
+    val nativeData1 = NativeData(shape, Memory.Format.nchw, DataType.U8)
+    val nativeData2 = NativeData(shape, Memory.Format.nchw, DataType.U8)
+
+    concat.add(ReorderMemory(nativeData1))
+    concat.add(ReorderMemory(nativeData2))
+
+    model.compile(InferencePhase, Array(heapData))
+    model.forward(input)
+
+    {
+      val output = new Array[Byte](shape.product)
+      Memory.CopyPtr2ByteArray(model.output.asInstanceOf[DnnTensor[Byte]].storageAddress(),
+        0, output, 0, shape.product, 1)
+      output.foreach(println)
+    }
   }
 }

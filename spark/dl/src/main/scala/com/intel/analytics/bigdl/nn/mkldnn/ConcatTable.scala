@@ -50,7 +50,8 @@ class ConcatTable extends MklDnnContainer {
         .asInstanceOf[Tensor[Float]]
       i += 1
     }
-    MklDnnOps.streamSubmit(runtime.stream, 1, sumPrimitive, 1, tensorPrimitives, tensors)
+    MklDnnOps.streamSubmit(runtime.stream, 1, sumPrimitive, 1, tensorPrimitives,
+      tensors.asInstanceOf[Array[Tensor[_]]])
     gradInput
   }
 
@@ -129,6 +130,10 @@ class ConcatTable extends MklDnnContainer {
     _gradOutputWeightFormats
   }
 
+  private[mkldnn] def reconstruct(): Unit = {
+    mklDnnModules = modules.map(_.asInstanceOf[MklDnnModule]).toArray
+  }
+
   override private[mkldnn] def inputFormats() = {
     require(_inputFormats != null, "You should call initFwdPrimitives first")
     _inputFormats
@@ -156,6 +161,14 @@ class ConcatTable extends MklDnnContainer {
   private var _gradOutputWeightFormats: Array[MemoryData] = _
 
   override private[mkldnn] def gradOutputWeightFormats() = _gradOutputWeightFormats
+
+  override def generateScalesWithMask(input: Activity, inAndOutMask: Int, weightMask: Int): Unit = {
+    modules.foreach {
+      case module: MklDnnModule =>
+        module.generateScalesWithMask(input, inAndOutMask, weightMask)
+      case _ =>
+    }
+  }
 
   override def toString(): String = {
     val tab = "\t"

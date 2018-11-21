@@ -20,10 +20,12 @@ import java.io.{IOException, ObjectOutputStream}
 
 import com.intel.analytics.bigdl.Module
 import com.intel.analytics.bigdl.mkl._
+import com.intel.analytics.bigdl.models.rnn.Utils.TrainParams
 import com.intel.analytics.bigdl.nn._
 import com.intel.analytics.bigdl.nn.abstractnn._
+import com.intel.analytics.bigdl.nn.mkldnn.Phase.TrainingPhase
 import com.intel.analytics.bigdl.optim.Regularizer
-import com.intel.analytics.bigdl.tensor.{DnnTensor, Tensor}
+import com.intel.analytics.bigdl.tensor.{DenseTensor, DenseTensorMath, DnnTensor, Tensor}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -82,6 +84,9 @@ class SpatialConvolution(
   @transient private var updateGradWTensors: Array[Tensor[Float]] = _
   @transient private var paddingTL: Array[Int] = _
   @transient private var paddingBR: Array[Int] = _
+
+  var needQuantize: Boolean = false
+  var negativeInput: Boolean = true
 
   private var _relu = false
   private var _sum = false
@@ -160,6 +165,7 @@ class SpatialConvolution(
   }
 
   override private[mkldnn] def initFwdPrimitives(inputs: Array[MemoryData], phase: Phase) = {
+    println(s"${getName()}")
     reorderManager.setRuntime(runtime)
 
     if (_sum && inputs.length > 1) {
@@ -167,7 +173,11 @@ class SpatialConvolution(
       require(inputs.length == 2,
         s"inputs length should be 2 when having sum operation, but get ${inputs.length}")
     }
-    val inputMemoryData = inputs(_dim - 1)
+    val inputMemoryData = if (inputs.length == 1) {
+      inputs(0)
+    } else {
+      inputs(1 - _dim)
+    }
     val inputHeight = inputMemoryData.shape(2) // TODO only supports 4-D and nchw
     val inputWidth = inputMemoryData.shape(3)
 
@@ -190,11 +200,35 @@ class SpatialConvolution(
     val inputShape = inputMemoryData.shape
     val outputShape = Array(inputMemoryData.shape(0), nOutputPlane, outputHeight, outputWidth)
 
-    val src = NativeData(inputShape, Memory.Format.any)
-    val wei = NativeData(weightShape, Memory.Format.any)
-    val bis = NativeData(Array(nOutputPlane), Memory.Format.x)
-    val dst = NativeData(outputShape, Memory.Format.any)
+    val inputDataType = if (needQuantize) {
+      if (negativeInput) {
+        DataType.S8
+      } else {
+        DataType.U8
+      }
+    } else DataType.F32
+    val weightDataType = if (needQuantize) DataType.S8 else DataType.F32
+    val biasDataType = if (needQuantize) DataType.S32 else DataType.F32
+    val outputDataType = if (needQuantize) {
+      if (relu && !sum) {
 
+//      if (relu) {
+        DataType.U8
+      } else {
+        DataType.S8
+      }
+    } else {
+      DataType.F32
+    }
+
+    println(s"${getName()} -- ${outputDataType}")
+
+    val src = NativeData(inputShape, Memory.Format.any, inputDataType)
+    val wei = NativeData(weightShape, Memory.Format.any, weightDataType)
+    val bis = NativeData(Array(nOutputPlane), Memory.Format.x, biasDataType)
+    val dst = NativeData(outputShape, Memory.Format.any, outputDataType)
+
+    // TODO check wether ForwardInference and ForwardTraining is the same
     val desc = MklDnn.ConvForwardDescInit(
       PropKind.ForwardTraining, AlgKind.ConvolutionDirect,
       src.getMemoryDescription(),
@@ -205,16 +239,85 @@ class SpatialConvolution(
       MklDnn.PaddingKind.mkldnnPaddingZero)
 
     forwardPrimDesc = if (relu || sum) {
+      val attr = MklDnn.CreateAttr()
+
+      // create output scales for s8/u8 output
+      if (needQuantize) {
+        require(weight.scales != null)
+
+        val scaleOut = if (relu) { // && !sum) {
+          255.0f / scalesOfOutput.scales(0)(0)
+        } else {
+          127.0f / scalesOfOutput.scales(0)(0)
+        }
+
+        val scaleIn = if (negativeInput) {
+          127.0f / scalesOfInput.scales(0)(0)
+        } else {
+          255.0f / scalesOfInput.scales(0)(0)
+        }
+
+        val scales = weight.scales.map(w => if (Math.abs(w - 0.0f) < DenseTensorMath.floatEpsilon) {
+          0.0f
+        } else {
+          scaleOut / (scaleIn * 127.0f / w)
+        }).toArray
+        MklDnn.AttrSetOutputScales(attr, scales.length, 2, scales)
+        MklDnn.AttrSetIntOutputRoundMode(attr, 1)
+      }
+
       val postOps = MklDnn.CreatePostOps()
       if (sum) {
-        MklDnn.PostOpsAppendSum(postOps, 1.0f)
+        val sumScale = if (needQuantize) {
+//          require(sumOp.outputFormats()(0).dataType == outputDataType)
+          println(sumOp)
+          require(sumOp.outputFormats()(0).scales.nonEmpty)
+          val scaleOut = if (relu) { // && !sum) {
+            255.0f / scalesOfOutput.scales(0)(0)
+          } else {
+            127.0f / scalesOfOutput.scales(0)(0)
+          }
+          scaleOut / sumOp.outputFormats()(0).scales(0)
+        } else {
+          1.0f
+        }
+        println(sumScale)
+        MklDnn.PostOpsAppendSum(postOps, sumScale)
       }
       if (relu) {
         MklDnn.PostOpsAppendEltwise(postOps, 1.0f, AlgKind.EltwiseRelu, 0.0f, 0.0f)
       }
-      val attr = MklDnn.CreateAttr()
       MklDnn.AttrSetPostOps(attr, postOps)
 
+      MklDnn.PrimitiveDescCreateV2(desc, attr, runtime.engine, 0)
+      // TODO we should destroy these ops
+    } else if (needQuantize) {
+      val attr = MklDnn.CreateAttr()
+
+      // create output scales for s8/u8 output
+      MklDnn.AttrSetIntOutputRoundMode(attr, 1)
+      require(weight.scales != null)
+
+      require(scalesOfOutput.scales(0).nonEmpty)
+
+      val scaleOut = if (relu) {
+        255.0f / scalesOfOutput.scales(0)(0)
+      } else {
+        127.0f / scalesOfOutput.scales(0)(0)
+      }
+
+      val scaleIn = if (negativeInput) {
+        127.0f / scalesOfInput.scales(0)(0)
+      } else {
+        255.0f / scalesOfInput.scales(0)(0)
+      }
+
+      val scales = weight.scales.map(w => if (Math.abs(w - 0.0f) < DenseTensorMath.floatEpsilon) {
+        0.0f
+      } else {
+        scaleOut / (scaleIn * 127.0f / w)
+      }).toArray
+      MklDnn.AttrSetOutputScales(attr, scales.length, 2, scales)
       MklDnn.PrimitiveDescCreateV2(desc, attr, runtime.engine, 0)
       // TODO we should destroy these ops
     } else {
@@ -225,17 +328,47 @@ class SpatialConvolution(
       MemoryData.operationWant(forwardPrimDesc, x)
     }
 
-    // The weight on heap should be oihw or goihw format and should reorder it first when using.
+    // by default, the initial weight is oihw / goihw format.
     val defaultWeightLayout = if (nGroup == 1) {
       Memory.Format.oihw
     } else {
       Memory.Format.goihw
     }
 
-    weight.setMemoryData(HeapData(weight.dense.size(), defaultWeightLayout),
-      realWei, runtime)
-    bias.setMemoryData(HeapData(bias.dense.size(), Memory.Format.x),
-      bis, runtime)
+    val defaultWeight = HeapData(weight.dense.size(), defaultWeightLayout)
+    val defaultBias = HeapData(bias.dense.size(), Memory.Format.x)
+
+    if (needQuantize) {
+      defaultWeight.setMask(weight.mask)
+      defaultWeight.setScales(weight.scales.map(w => 127.0f / w).toArray)
+
+      val weightsSum = weight.dense.sum
+
+      defaultBias.setMask(bias.mask)
+      if (negativeInput) {
+        defaultBias.setScales(bias.scales.toArray.zip(weight.scales)
+          .map(x =>
+            if (Math.abs(x._2 - 0.0f) < DenseTensorMath.floatEpsilon) {
+              0.0f
+            } else {
+              127.0f / x._2 * 127.0f / scalesOfInput.scales(0)(0)
+            }))
+      } else {
+        defaultBias.setScales(bias.scales.toArray.zip(weight.scales)
+          .map(x =>
+            if (Math.abs(x._2 - 0.0f) < DenseTensorMath.floatEpsilon) {
+              0.0f
+            } else {
+              127.0f / x._2 * 255.0f / scalesOfInput.scales(0)(0)
+            }))
+//            .map(x => 128.0f / (127.0f / scalesOfInput.scales(0)(0)) * x._2)
+      }
+      // TODO why bias affects the results
+//      bias.dense.fill(0.0f)
+    }
+
+    weight.setMemoryData(defaultWeight, realWei, runtime)
+    bias.setMemoryData(defaultBias, bis, runtime)
 
     weight.sync()
     bias.sync()
@@ -250,10 +383,47 @@ class SpatialConvolution(
 
     updateOutputMemoryPrimitives = srcs ++ dsts
     updateOutputPrimitives = Array(primitive)
-    output = initTensor(realDst)
+    output = initActivity(Array(realDst))
 
-    _inputFormats = if (_sumInput) Array(realSrc, realSrc) else Array(realSrc)
+    // quantize weight from fp32 to int8
+    if (needQuantize) {
+      realSrc.setMask(scalesOfInput.mask)
+      val max = if (negativeInput) {
+        127.0f
+      } else {
+        255.0f
+      }
+      realSrc.setScales(scalesOfInput.scales(0).map(x => max / x))
+    }
+
+    if (needQuantize) {
+      realDst.setMask(scalesOfOutput.mask)
+      val max = if (relu) { //  && !sum) {
+        255.0f
+      } else {
+        127.0f
+      }
+
+      realDst.setScales(scalesOfOutput.scales(0).map(x => max / x))
+    }
+
+    if (needQuantize && sum) {
+      require(realDst.layout == sumOp.outputFormats()(0).layout)
+      require(realDst.dataType == sumOp.outputFormats()(0).dataType)
+    }
+
+    _inputFormats = if (_sumInput) {
+      val tmp = Array(inputs(0), inputs(1))
+      tmp(1 - _dim) = realSrc
+      tmp
+    } else {
+      Array(realSrc)
+    }
     _outputFormats = Array(realDst)
+
+    updateOutputTensors = null
+
+//    println(s"${getName()} - ${inputFormats()(0).scales(0)} - ${outputFormats()(0).scales(0)}")
     (_inputFormats, _outputFormats)
   }
 
@@ -261,17 +431,14 @@ class SpatialConvolution(
     val inputTensor = if (input.isTensor) {
       input.toTensor[Float]
     } else {
-      output = input.toTable.get[Tensor[Float]](3 - _dim).get
-      input.toTable.get[Tensor[Float]](_dim).get
+      output = input.toTable.get[Tensor[Float]](_dim + 1).get
+      input.toTable.get[Tensor[Float]](2 - _dim).get
     }
     if (updateOutputTensors == null) {
       val buffer = new ArrayBuffer[Tensor[Float]]()
       buffer.append(inputTensor.asInstanceOf[Tensor[Float]])
       buffer.append(weight.native)
       buffer.append(bias.native)
-      if (sum && input.isTensor) {
-        output = sumOp.output
-      }
       buffer.append(output.asInstanceOf[Tensor[Float]])
       updateOutputTensors = buffer.toArray
     }
@@ -284,8 +451,16 @@ class SpatialConvolution(
     }
 
     MklDnnOps.streamSubmit(runtime.stream, 1, updateOutputPrimitives, updateOutputPrimitives.length,
-      updateOutputMemoryPrimitives, updateOutputTensors)
+      updateOutputMemoryPrimitives, updateOutputTensors.asInstanceOf[Array[Tensor[_]]])
 
+
+    if (getName().contains("res3d_branch2c")) {
+      val defaultOutput = HeapData(outputFormats()(0).shape, Memory.Format.nchw)
+      reorderManager.register(outputFormats()(0), defaultOutput)
+      val tmp = reorderManager.infer(outputFormats(), Array(defaultOutput), output)
+
+      println()
+    }
     output
   }
 
@@ -353,7 +528,8 @@ class SpatialConvolution(
     updateWithNewTensor(updateGradInputTensors, 1, weightForBackward)
 
     MklDnnOps.streamSubmit(runtime.stream, 1, updateGradInputPrimitives,
-      updateGradInputPrimitives.length, updateGradInputMemoryPrimitives, updateGradInputTensors)
+      updateGradInputPrimitives.length, updateGradInputMemoryPrimitives,
+      updateGradInputTensors.asInstanceOf[Array[Tensor[_]]])
 
     gradInput
   }
@@ -417,7 +593,7 @@ class SpatialConvolution(
     val inputTensor = if (input.isTensor) {
       input.toTensor[Float]
     } else {
-      input.toTable.get[Tensor[Float]](_dim).get
+      input.toTable.get[Tensor[Float]](2 - _dim).get
     }
     inputForAcc = reorderManager.infer(Array(inputFormats()(0)),
       Array(inputForAccMemoryData), inputTensor).asInstanceOf[DnnTensor[Float]]
@@ -435,7 +611,8 @@ class SpatialConvolution(
     updateWithNewTensor(updateGradWTensors, 1, gradOutput)
 
     MklDnnOps.streamSubmit(runtime.stream, 1, accGradientPrimitives,
-      accGradientPrimitives.length, updateGradWMemoryPrimitives, updateGradWTensors)
+      accGradientPrimitives.length, updateGradWMemoryPrimitives,
+      updateGradWTensors.asInstanceOf[Array[Tensor[_]]])
 
     gradWeight.sync()
     gradBias.sync()
@@ -466,6 +643,88 @@ class SpatialConvolution(
     List(weight, bias, gradWeight, gradBias).foreach(_.release())
     if (weightForBackward != null) { weightForBackward.release() }
   }
+
+  private[bigdl] def updateWeightsScales(): Unit = {
+    {
+      // reorder the weights
+      val format = if (weight.size().length == 4) {
+        Memory.Format.oihw
+      } else {
+        Memory.Format.goihw
+      }
+
+      val result = weight.dense
+
+      val (mask, scales) = weight.size().length match {
+        case 4 =>
+          val mask = math.pow(2, 0).toInt
+          val scales = ArrayBuffer.empty[Float]
+
+          var i = 0
+          while (i < nOutputPlane) {
+            scales.append(weight.dense.select(1, i + 1).clone().abs().max())
+            i += 1
+          }
+          (mask, scales.toArray)
+        case 5 =>
+          val mask = math.pow(2, 1).toInt
+          val scales = ArrayBuffer.empty[Float]
+
+          var i = 0
+          while (i < nOutputPlane) {
+            scales.append(weight.dense.select(2, i + 1).clone().max())
+            i += 1
+          }
+          (mask, scales.toArray)
+        case _ =>
+          throw new UnsupportedOperationException
+      }
+
+      weight.mask = mask
+      weight.scales.clear()
+      weight.scales.appendAll(scales)
+    }
+
+    {
+      bias.mask = 1
+      bias.scales.++=(bias.dense.clone().contiguous().storage().array())
+    }
+  }
+
+  override def generateWeightScales(i: Int): Unit = {
+    updateWeightsScales()
+  }
+
+  override def generateInAndOutScales(input: Activity, inAndOutMask: Int): Unit = {
+    val defaultInput = HeapData(inputFormats()(0).shape, Memory.Format.nchw)
+    val defaultOutput = HeapData(outputFormats()(0).shape, Memory.Format.nchw)
+
+    reorderManager.register(inputFormats()(0), defaultInput)
+    reorderManager.register(outputFormats()(0), defaultOutput)
+
+    val defaultInputData =
+      reorderManager.infer(inputFormats(), Array(defaultInput), input).toTensor[Float]
+    val minIn = defaultInputData.min()
+    val maxIn = defaultInputData.abs().max()
+
+    if (minIn >= 0) {
+      // TODO this should be set after the previous layer is ReLU
+      negativeInput = false
+    }
+
+    scalesOfInput.update(Array(maxIn), 0)
+
+    var maxOut = reorderManager.infer(outputFormats(), Array(defaultOutput), output)
+      .toTensor[Float].abs().max()
+
+    scalesOfOutput.update(Array(maxOut), 0)
+  }
+
+  override def setQuantizeFlag(value: Boolean): this.type = {
+    needQuantize = true
+    this
+  }
+
 }
 
 object SpatialConvolution {

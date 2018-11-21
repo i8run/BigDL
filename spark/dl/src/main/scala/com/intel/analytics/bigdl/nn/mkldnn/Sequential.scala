@@ -16,11 +16,13 @@
 package com.intel.analytics.bigdl.nn.mkldnn
 
 import com.intel.analytics.bigdl.Module
+import com.intel.analytics.bigdl.mkl.Memory
 import com.intel.analytics.bigdl.nn.abstractnn.{AbstractModule, Activity}
 import com.intel.analytics.bigdl.nn.mkldnn.Phase.{InferencePhase, TrainingPhase}
 import com.intel.analytics.bigdl.nn.{Sequential => Seq}
 import com.intel.analytics.bigdl.tensor.Tensor
 
+import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 class Sequential extends MklDnnContainer {
@@ -174,7 +176,8 @@ class Sequential extends MklDnnContainer {
 
   type ArrayBufferModules[Float] = ArrayBuffer[AbstractModule[Activity, Activity, Float]]
   private def convWithBn(modules: Array[MklDnnModule], phase: Phase): Array[MklDnnModule] = {
-    if (fuseConvBn && phase == InferencePhase) {
+    if (System.getProperty("bigdl.mkldnn.fusion.convbn", "false").toBoolean &&
+      phase == InferencePhase) {
       val newModules: ArrayBuffer[MklDnnModule] = ArrayBuffer.empty
       var lastBn: SpatialBatchNormalization = null
 
@@ -196,7 +199,7 @@ class Sequential extends MklDnnContainer {
   }
 
   private def convWithReLU(modules: Array[MklDnnModule], phase: Phase): Array[MklDnnModule] = {
-    if (fuseConvRelu) {
+    if (System.getProperty("bigdl.mkldnn.fusion.convrelu", "false").toBoolean) {
       val newModules: ArrayBuffer[MklDnnModule] = ArrayBuffer.empty
       var lastReLU: ReLU = null
 
@@ -205,6 +208,7 @@ class Sequential extends MklDnnContainer {
           case (conv: SpatialConvolution, relu: ReLU) =>
             newModules.append(conv)
             conv.setReLU()
+            conv.scalesOfOutput.set(relu.scalesOfOutput.scales.toArray)
             lastReLU = relu
           case (f: MklDnnContainer, s) =>
             f.fusion(phase)
@@ -222,7 +226,7 @@ class Sequential extends MklDnnContainer {
   }
 
   private def bnWithReLU(modules: Array[MklDnnModule], phase: Phase): Array[MklDnnModule] = {
-    if (fuseBnRelu) {
+    if (System.getProperty("bigdl.mkldnn.fusion.bnrelu", "false").toBoolean) {
       val newModules: ArrayBuffer[MklDnnModule] = ArrayBuffer.empty
       var lastReLU: ReLU = null
 
@@ -245,7 +249,8 @@ class Sequential extends MklDnnContainer {
 
   private def convWithSum(modules: Array[MklDnnModule], phase: Phase): Array[MklDnnModule] = {
     val newModules: ArrayBuffer[MklDnnModule] = ArrayBuffer.empty
-    if (!fuseConvSum || modules.length <= 2 || phase == TrainingPhase) {
+    if (!System.getProperty("bigdl.mkldnn.fusion.convsum", "false").toBoolean ||
+      modules.length <= 2 || phase == TrainingPhase) {
       newModules.appendAll(modules)
     } else {
       var lastConv: SpatialConvolution = null
@@ -258,9 +263,11 @@ class Sequential extends MklDnnContainer {
           if (sbt != null) {
             newModules.append(sbt)
           }
+          conv.scalesOfOutput.set(s.scalesOfOutput.scales.toArray)
         case (f: MklDnnContainer, s) => f.fusion(phase); newModules.append(f)
         case (f: CAddTable, s: ReLU) => if (lastConv != null) {
           lastConv.setReLU()
+          lastConv.scalesOfOutput.set(s.scalesOfOutput.scales.toArray)
           lastReLU = s
           lastConv = null
         } else {
@@ -289,10 +296,16 @@ class Sequential extends MklDnnContainer {
     val convWeight = Tensor[Float].resize(conv.weight.size()).copy(conv.weight.dense)
     val convBias = Tensor[Float].resize(conv.bias.size()).copy(conv.bias.dense)
 
+    val bnWeight = Tensor[Float].resizeAs(bn.weightAndBias.dense).copy(bn.weightAndBias.dense)
+
     (0 until bn.nOutput).foreach { j =>
-      val variance = originVar.storage().array()(j + originVar.storageOffset() - 1)
+      val variance = originVar.storage().array()(j + originVar.storageOffset() - 1) /
+        bn.scaleFactor.storage().array()(0)
       val base = Math.sqrt(variance.asInstanceOf[Float] + bn.eps).toFloat
       require(base != 0.0, s"the eps of ${bn.getName()} should be more than 0")
+
+      val alpha = bnWeight.storage().array()(bnWeight.storageOffset() - 1 + j)
+      val beta = bnWeight.storage().array()(bnWeight.storageOffset() - 1 + bn.nOutput + j)
 
       val weight = if (conv.nGroup == 1) {
         convWeight.select(1, j + 1)
@@ -300,30 +313,34 @@ class Sequential extends MklDnnContainer {
         convWeight.select(2, j + 1)
       }
       weight.div(base)
+      weight.mul(alpha)
 
       val bias = convBias.storage().array()(j)
-      val mean = originMean.storage().array()(j)
-      convBias.storage().array()(j) = (bias - mean) / base
+      val mean = originMean.storage().array()(j) / bn.scaleFactor.storage().array()(0)
+      convBias.storage().array()(j) = alpha / base * bias + beta - (alpha * mean) / base
     }
 
     conv.weight.copy(convWeight)
     conv.bias.copy(convBias)
+
+    conv.generateWeightScales(2)
+    conv.scalesOfOutput.set(bn.scalesOfOutput.scales.toArray)
   }
 
-  private def getLast(
-    module: AbstractModule[Activity, Activity, Float]): AbstractModule[Activity, Activity, Any] = {
+  private type FloatActivityModule = AbstractModule[Activity, Activity, Float]
+  private def getLast(module: FloatActivityModule): FloatActivityModule = {
     val ret = module match {
       case sequential: Sequential => sequential.modules.last
       case _ => module
     }
 
-    ret.asInstanceOf[AbstractModule[Activity, Activity, Any]]
+    ret.asInstanceOf[FloatActivityModule]
   }
 
   private def convSum(concatTable: ConcatTable, cAddTable: CAddTable): (SpatialConvolution,
     SelectTable) = {
-    var branch1: AbstractModule[Activity, Activity, Any] = null
-    var branch2: AbstractModule[Activity, Activity, Any] = null
+    var branch1: FloatActivityModule = null
+    var branch2: FloatActivityModule = null
 
     var continue = concatTable.modules.length == 2
 
@@ -331,7 +348,7 @@ class Sequential extends MklDnnContainer {
       branch1 = getLast(concatTable.modules(0))
       branch2 = getLast(concatTable.modules(1))
 
-      def isConvOrIdentity(module: AbstractModule[Activity, Activity, Any]): Boolean = {
+      def isConvOrIdentity(module: AbstractModule[Activity, Activity, Float]): Boolean = {
         module.isInstanceOf[SpatialConvolution] || module.isInstanceOf[Identity]
       }
 
@@ -348,13 +365,15 @@ class Sequential extends MklDnnContainer {
         concatTable.modules(0) = concatTable.modules(1)
         concatTable.modules(1) = tmp
 
-        tmp = branch1.asInstanceOf[AbstractModule[Activity, Activity, Float]]
+        concatTable.reconstruct()
+
+        tmp = branch1
         branch1 = branch2
-        branch2 = tmp.asInstanceOf[AbstractModule[Activity, Activity, Any]]
+        branch2 = tmp
       }
 
       // get the index of conv, by default the output should be the first conv.
-      val (convIndex, conv, theOther) = (1, branch2.asInstanceOf[SpatialConvolution], branch1)
+      val (convIndex, conv, theOther) = (2, branch2.asInstanceOf[SpatialConvolution], branch1)
       conv.setSum()
 
       // delete CAddTable
@@ -366,6 +385,32 @@ class Sequential extends MklDnnContainer {
       (conv, selectTable)
     } else {
       (null, null)
+    }
+  }
+
+  override def generateScalesWithMask(input: Activity, inAndOutMask: Int, weightMask: Int): Unit = {
+    var i = 0
+    var lastOutput = input
+    while (i < this.modules.length - 1) {
+      if (this.modules(i).isInstanceOf[MklDnnModule]) {
+        val mkldnnModule = this.modules(i).asInstanceOf[MklDnnModule]
+        mkldnnModule.generateScalesWithMask(lastOutput, inAndOutMask, weightMask)
+      }
+
+      val curOutput = this.modules(i).output
+      require(mklDnnModules(i).outputFormats().length == mklDnnModules(i + 1).inputFormats().length)
+      lastOutput = reorderManager.infer(
+        mklDnnModules(i).outputFormats(),
+        mklDnnModules(i + 1).inputFormats(),
+        curOutput
+      )
+
+      i += 1
+    }
+
+    if (this.modules(i).isInstanceOf[MklDnnModule]) {
+      this.modules(i).asInstanceOf[MklDnnModule].generateScalesWithMask(lastOutput, inAndOutMask,
+        weightMask)
     }
   }
 

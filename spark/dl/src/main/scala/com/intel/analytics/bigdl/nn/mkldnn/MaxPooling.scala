@@ -18,6 +18,7 @@ package com.intel.analytics.bigdl.nn.mkldnn
 import com.intel.analytics.bigdl.mkl._
 import com.intel.analytics.bigdl.nn.Utils
 import com.intel.analytics.bigdl.nn.abstractnn.Activity
+import com.intel.analytics.bigdl.nn.mkldnn.Phase.{InferencePhase, TrainingPhase}
 import com.intel.analytics.bigdl.tensor.Tensor
 
 class MaxPooling(
@@ -35,6 +36,8 @@ class MaxPooling(
   @transient private var paddingTL: Array[Int] = _
   @transient private var paddingBR: Array[Int] = _
   @transient private var fwdPD: Long = _
+
+  var isOnlyForInference = false
 
   // reminder: ceilMode default value is true,
   // but in blas SpatialMaxPooling, default ceilMode is false
@@ -76,21 +79,45 @@ class MaxPooling(
     paddingTL = Array(pt, pl)
     paddingBR = Array(pb, pr)
 
-    val outputMD = MklDnn.MemoryDescInit(4, Array(n, c, oh, ow), DataType.F32, Memory.Format.any)
+    val kind = if (!isTraining()) PropKind.ForwardScoring else PropKind.ForwardTraining
+
+    if (!isTraining()) {
+      isOnlyForInference = true
+    } else {
+      isOnlyForInference = false
+    }
+
+    val outputMD = MklDnn.MemoryDescInit(4, Array(n, c, oh, ow), inputs(0).dataType,
+      Memory.Format.any)
     val description = MklDnn.PoolingForwardDescInit(
-      PropKind.Forward, AlgKind.PoolingMax,
+      kind, AlgKind.PoolingMax,
       _inputFormats(0).getMemoryDescription(), outputMD, strides, kernel, paddingTL, paddingBR,
       MklDnn.PaddingKind.mkldnnPaddingZero)
     fwdPD = MklDnn.PrimitiveDescCreate(description, runtime.engine, 0L)
+
     _outputFormats = Array(MemoryData.primitiveOutput(fwdPD))
+    if (inputFormats()(0).scales.nonEmpty) {
+      _outputFormats(0).setMask(inputFormats()(0).mask)
+      _outputFormats(0).setScales(inputFormats()(0).scales)
+    }
     output = initTensor(_outputFormats(0))
-    workSpaceFormat = MemoryData.primitiveWorkSpace(fwdPD)
-    workSpace = initTensor(workSpaceFormat)
-    updateOutputPrimitives = Array(MklDnn.PrimitiveCreate2(fwdPD,
-      _inputFormats.map(_.getPrimitive(runtime)), Array(0), 1,
-      Array(_outputFormats(0), workSpaceFormat).map(_.getPrimitive(runtime)), 2))
-    fwdMemPrims = Array(_inputFormats(0), _outputFormats(0), workSpaceFormat)
-      .map(_.getPrimitive(runtime))
+    if (phase == TrainingPhase) {
+      workSpaceFormat = MemoryData.operationWant(fwdPD, Query.WorkspacePd)
+      workSpace = initTensor(workSpaceFormat).asInstanceOf[Tensor[Float]]
+      updateOutputPrimitives = Array(MklDnn.PrimitiveCreate2(fwdPD,
+        _inputFormats.map(_.getPrimitive(runtime)), Array(0), 1,
+        Array(_outputFormats(0), workSpaceFormat).map(_.getPrimitive(runtime)), 2))
+      fwdMemPrims = Array(_inputFormats(0), _outputFormats(0), workSpaceFormat)
+        .map(_.getPrimitive(runtime))
+    } else {
+      updateOutputPrimitives = Array(MklDnn.PrimitiveCreate2(fwdPD,
+        _inputFormats.map(_.getPrimitive(runtime)), Array(0), 1,
+        Array(_outputFormats(0)).map(_.getPrimitive(runtime)), 1))
+      fwdMemPrims = Array(_inputFormats(0), _outputFormats(0)).map(_.getPrimitive(runtime))
+    }
+
+    println(s"${getName()}, ${_inputFormats(0)}")
+    println(s"${getName()}, ${_outputFormats(0)}")
     (_inputFormats, _outputFormats)
   }
 
@@ -105,7 +132,7 @@ class MaxPooling(
       strides, kernel, paddingTL, paddingBR, MklDnn.PaddingKind.mkldnnPaddingZero)
 
     val pd = MklDnn.PrimitiveDescCreate(description, runtime.engine, fwdPD)
-    _gradInputFormats = Array(MemoryData.primitiveGradInput(pd))
+    _gradInputFormats = Array(MemoryData.operationWant(pd, Query.DiffSrcPd))
     updateGradInputPrimitives = Array(MklDnn.PrimitiveCreate2(pd,
       Array(_gradOutputFormats(0), workSpaceFormat).map(_.getPrimitive(runtime)),
       Array(0, 0), 2, _gradInputFormats.map(_.getPrimitive(runtime)), 1))
@@ -116,9 +143,15 @@ class MaxPooling(
   }
 
   override def updateOutput(input: Activity): Activity = {
-    val buffer = Array(input.asInstanceOf[Tensor[Float]], output.asInstanceOf[Tensor[Float]],
-      workSpace)
-    MklDnnOps.streamSubmit(runtime.stream, 1, updateOutputPrimitives, 1, fwdMemPrims, buffer)
+    val buffer = if (!isOnlyForInference) {
+      Array(input.asInstanceOf[Tensor[Float]], output.asInstanceOf[Tensor[Float]],
+        workSpace)
+    } else {
+      Array(input.asInstanceOf[Tensor[Float]], output.asInstanceOf[Tensor[Float]])
+    }
+
+    MklDnnOps.streamSubmit(runtime.stream, 1, updateOutputPrimitives, 1, fwdMemPrims,
+      buffer.asInstanceOf[Array[Tensor[_]]])
     output
   }
 
@@ -127,7 +160,7 @@ class MaxPooling(
       input.asInstanceOf[Tensor[Float]], gradOutput.asInstanceOf[Tensor[Float]], workSpace,
       gradInput.asInstanceOf[Tensor[Float]])
     MklDnnOps.streamSubmit(runtime.stream, 1, updateGradInputPrimitives, 1,
-      bwdMemPrims, buffer)
+      bwdMemPrims, buffer.asInstanceOf[Array[Tensor[_]]])
     gradInput
   }
 }

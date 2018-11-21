@@ -86,6 +86,20 @@ class ConcatTableSpec extends FlatSpec with Matchers {
       module.backward(T(), T())
     }
   }
+
+  "ConcatTable" should "work on different size of output tensors" in {
+    val model =
+      ConcatTable[Activity, Float]()
+        .add(Narrow[Float](2, 1, 4))
+        .add(Narrow[Float](2, 5, 1))
+
+    val input = Tensor[Float](3, 5).rand()
+    model.forward(input)
+
+    // check the input and output
+    println(input)
+    println(model.output)
+  }
 }
 
 class ConcatTableSerialTest extends ModuleSerializationTest {

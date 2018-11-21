@@ -48,18 +48,73 @@ class JoinTable(val dimension: Int) extends MklDnnLayer {
       }
       i += 1
     }
+
     val primDesc = MklDnn.ConcatPrimitiveDescCreate(
-      MklDnn.MemoryDescInit(totalShape.length, totalShape, DataType.F32, Memory.Format.any),
+      MklDnn.MemoryDescInit(totalShape.length, totalShape, inputs(0).dataType, Memory.Format.any),
       inputs.length, dimension - 1, _inputFormats.map(_.getPrimitiveDescription(runtime)))
 
-    _outputFormats = Array(MemoryData.primitiveOutput(primDesc))
+    _outputFormats = if (inputFormats()(0).mask != -1) {
+      val mask = inputFormats()(0).mask
+      val scales = inputFormats()(0).scales
+      val format = MemoryData.primitiveOutput(primDesc)
+      format.setMask(mask)
+      format.setScales(scales)
+      Array(format)
+    } else {
+      Array(MemoryData.primitiveOutput(primDesc))
+    }
     updateOutputPrimitives = Array(MklDnn.PrimitiveCreate2(primDesc,
       _inputFormats.map(_.getPrimitive(runtime)),
       new Array[Int](inputs.length), inputs.length,
       _outputFormats.map(_.getPrimitive(runtime)), 1)
     )
     output = initTensor(_outputFormats(0))
+
+    updateOutputMemoryPrimitives = null
+    updateOutputTensors = null
     (_inputFormats, _outputFormats)
+  }
+
+  @transient
+  private var updateOutputMemoryPrimitives: Array[Long] = _
+  @transient
+  private var updateOutputTensors: Array[Tensor[Float]] = _
+
+  override def updateOutput(input: Activity): Activity = {
+    if (updateOutputMemoryPrimitives == null) {
+      updateOutputMemoryPrimitives = getUpdateOutputMemoryPrimitives()
+    }
+    if (updateOutputTensors == null) {
+      val buffer = new ArrayBuffer[Tensor[Float]]()
+      if (input.isTensor) {
+        buffer.append(input.asInstanceOf[Tensor[Float]])
+      } else {
+        val table = input.toTable
+        var i = 1
+        while (i <= table.length()) {
+          buffer.append(table(i))
+          i += 1
+        }
+      }
+      if (output.isTensor) {
+        buffer.append(output.asInstanceOf[Tensor[Float]])
+      } else {
+        val table = output.toTable
+        var i = 1
+        while (i <= table.length()) {
+          buffer.append(table(i))
+          i += 1
+        }
+      }
+      updateOutputTensors = buffer.toArray
+    }
+
+    MklDnnOps.streamSubmit(
+      runtime.stream, 1, updateOutputPrimitives, updateOutputPrimitives.length,
+      updateOutputMemoryPrimitives,
+      updateOutputTensors.asInstanceOf[Array[Tensor[_]]]
+    )
+    output
   }
 
   override private[mkldnn] def initBwdPrimitives(grads: Array[MemoryData], phase: Phase) = {

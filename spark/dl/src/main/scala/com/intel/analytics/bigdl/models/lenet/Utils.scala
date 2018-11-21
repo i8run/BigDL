@@ -35,10 +35,10 @@ object Utils {
     checkpoint: Option[String] = None,
     modelSnapshot: Option[String] = None,
     stateSnapshot: Option[String] = None,
-    batchSize: Int = 12,
+    batchSize: Int = 100,
     learningRate: Double = 0.05,
     learningRateDecay: Double = 0.0,
-    maxEpoch: Int = 15,
+    maxEpoch: Int = 4,
     coreNumber: Int = -1,
     nodeNumber: Int = -1,
     overWriteCheckpoint: Boolean = false,
@@ -84,7 +84,8 @@ object Utils {
   case class TestParams(
     folder: String = "./",
     model: String = "",
-    batchSize: Int = 128
+    batchSize: Int = 100,
+    quantize: Boolean = false
   )
 
   val testParser = new OptionParser[TestParams]("BigDL Lenet Test Example") {
@@ -100,6 +101,10 @@ object Utils {
     opt[Int]('b', "batchSize")
       .text("batch size")
       .action((x, c) => c.copy(batchSize = x))
+
+    opt[Boolean]('q', "quantize")
+      .text("quantize the model")
+      .action((x, c) => c.copy(quantize = x))
   }
 
   /**

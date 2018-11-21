@@ -19,6 +19,9 @@ package com.intel.analytics.bigdl.utils.intermediate
 import com.intel.analytics.bigdl.mkl.Memory
 import com.intel.analytics.bigdl.nn.abstractnn.{Activity, DataFormat}
 import com.intel.analytics.bigdl.nn.mkldnn.{Equivalent, HeapData}
+import com.intel.analytics.bigdl.models.vgg.Vgg_16
+import com.intel.analytics.bigdl.nn.abstractnn.DataFormat
+import com.intel.analytics.bigdl.nn.mkldnn.HeapData
 import com.intel.analytics.bigdl.{Module, nn, utils}
 import com.intel.analytics.bigdl.nn.{Graph, Reshape, StaticGraph}
 import com.intel.analytics.bigdl.tensor.Tensor
@@ -155,4 +158,17 @@ class IRGraphSpec extends BigDLSpecHelper {
     Equivalent.nearequals(gradInputDnn.get[Tensor[Float]](2).get,
       gradInputBlas.get[Tensor[Float]](2).get, 1e-4) should be (true)
   }
+
+//  "convert vgg16" should "work correctly" in {
+//    System.setProperty("bigdl.engineType", "mkldnn")
+//    val vgg16 = Vgg_16.fusionGraph(1000)
+//    val ir = vgg16.asInstanceOf[StaticGraph[Float]].toIRgraph()
+//    ir.evaluate()
+//    val inputs = new Array[Tensor[Float]](1)
+//    inputs(0) = Tensor[Float](Array(10, 3, 224, 224)).rand(-1, 1)
+//    val quant = ir.quantize(inputs)
+//    quant.forward(inputs(0))
+//    println("")
+//    System.clearProperty("bigdl.engineType")
+//  }
 }

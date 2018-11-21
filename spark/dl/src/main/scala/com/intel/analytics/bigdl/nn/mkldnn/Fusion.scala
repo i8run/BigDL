@@ -30,7 +30,7 @@ import com.intel.analytics.bigdl.utils.Node
  */
 private[mkldnn] object Fusion {
 
-  private val fuse = System.getProperty("bigdl.mkldnn.fusion", "false").toBoolean
+  private def fuse = System.getProperty("bigdl.mkldnn.fusion", "false").toBoolean
 
   def fuseModule(node: Node[AbstractModule[Activity, Activity, Float]]): Unit = {
     if (!fuse) return;
@@ -79,11 +79,13 @@ private[mkldnn] object Fusion {
         case conv: SpatialConvolution =>
           if (!conv.relu) {
             conv.setReLU(true)
+            conv.scalesOfOutput.set(node.element.scalesOfOutput.scales.toArray)
             node.element = Identity[Float]().asInstanceOf[AbstractModule[Activity, Activity, Float]]
           }
         case bn: SpatialBatchNormalization =>
           if (!bn.relu) {
             bn.setReLU(true)
+            bn.scalesOfOutput.set(node.element.scalesOfOutput.scales.toArray)
             node.element = Identity[Float]().asInstanceOf[AbstractModule[Activity, Activity, Float]]
           }
         case _ => null
@@ -95,6 +97,15 @@ private[mkldnn] object Fusion {
     if (node.element.isInstanceOf[Identity] && node.prevNodes.length == 1) {
       findPrevious(node.prevNodes(0))
     } else node
+  }
+
+  private def shareSameOutputConvs(node: Node[AbstractModule[Activity, Activity, Float]]): Unit = {
+    val prev = findPrevious(node)
+    if (prev.element.isInstanceOf[SpatialConvolution] ||
+    prev.element.isInstanceOf[ReLU]) {
+      prev.element.asInstanceOf[SpatialConvolution].scalesOfOutput.set(
+        node.element.asInstanceOf[SpatialConvolution].scalesOfOutput.scales.toArray)
+    }
   }
 
   /**
@@ -122,13 +133,23 @@ private[mkldnn] object Fusion {
       if (conv != null) {
         node.element = conv.element
         val element = node.element.asInstanceOf[SpatialConvolution]
-        element.setSumOp(previousNodes(otherNumber - 1).element, otherNumber)
+        element.setSumOp(previousNodes(otherNumber).element, otherNumber)
         conv.element = Identity[Float]().asInstanceOf[AbstractModule[Activity, Activity, Float]]
 
         val nexts = node.nextNodes(0)
         if (nexts.element.isInstanceOf[ReLU] && !element.relu) {
           node.element.asInstanceOf[SpatialConvolution].setReLU(true)
+          node.element.asInstanceOf[SpatialConvolution].scalesOfOutput.set(
+            nexts.element.asInstanceOf[ReLU].scalesOfOutput.scales.toArray)
           nexts.element = new Identity()
+        }
+
+        val prevIsNotIdentity = findPrevious(previousNodes(otherNumber))
+
+        if (prevIsNotIdentity.element.isInstanceOf[SpatialConvolution]) {
+          prevIsNotIdentity.element.scalesOfOutput.set(node.element.scalesOfOutput.scales.toArray)
+        } else if (prevIsNotIdentity.element.isInstanceOf[ReLU]) {
+          prevIsNotIdentity.element.scalesOfOutput.set(node.element.scalesOfOutput.scales.toArray)
         }
       }
     }
@@ -151,7 +172,8 @@ private[mkldnn] object Fusion {
     val bnWeight = Tensor[Float].resizeAs(bn.weightAndBias.dense).copy(bn.weightAndBias.dense)
 
     (0 until bn.nOutput).foreach { j =>
-      val variance = originVar.storage().array()(j + originVar.storageOffset() - 1)
+      val variance = originVar.storage().array()(j + originVar.storageOffset() - 1) /
+        bn.scaleFactor.storage().array()(0)
       val base = Math.sqrt(variance.asInstanceOf[Float] + bn.eps).toFloat
       require(base != 0.0, s"the eps of ${bn.getName()} should be more than 0")
 
@@ -167,11 +189,15 @@ private[mkldnn] object Fusion {
       weight.mul(alpha)
 
       val bias = convBias.storage().array()(j)
-      val mean = originMean.storage().array()(j)
+      val mean = originMean.storage().array()(j) / bn.scaleFactor.storage().array()(0)
       convBias.storage().array()(j) = alpha / base * bias + beta - (alpha * mean) / base
     }
 
     conv.weight.copy(convWeight)
     conv.bias.copy(convBias)
+
+    // regenerate the weight scales and output scales
+    conv.generateWeightScales(2)
+    conv.scalesOfOutput.set(bn.scalesOfOutput.scales.toArray)
   }
 }

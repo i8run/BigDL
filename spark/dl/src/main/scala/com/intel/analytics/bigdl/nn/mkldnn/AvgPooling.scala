@@ -20,6 +20,8 @@ import com.intel.analytics.bigdl.nn.Utils
 import com.intel.analytics.bigdl.nn.abstractnn.Activity
 import com.intel.analytics.bigdl.tensor.Tensor
 
+import scala.collection.mutable.ArrayBuffer
+
 class AvgPooling(
   kW: Int,
   kH: Int,
@@ -77,13 +79,20 @@ class AvgPooling(
 
     paddingTL = Array(pt, pl)
     paddingBR = Array(pb, pr)
-    val outputMD = MklDnn.MemoryDescInit(4, Array(n, c, oh, ow), DataType.F32, Memory.Format.any)
+    val outputMD = MklDnn.MemoryDescInit(4, Array(n, c, oh, ow), inputs(0).dataType,
+      Memory.Format.any)
     val description = MklDnn.PoolingForwardDescInit(
-      PropKind.Forward, algKind,
+      PropKind.ForwardScoring, algKind,
       _inputFormats(0).getMemoryDescription(), outputMD, strides, kernel, paddingTL, paddingBR,
       MklDnn.PaddingKind.mkldnnPaddingZero)
     fwdPD = MklDnn.PrimitiveDescCreate(description, runtime.engine, 0L)
+
     _outputFormats = Array(MemoryData.primitiveOutput(fwdPD))
+    if (inputFormats()(0).scales.nonEmpty) {
+      _outputFormats(0).setMask(inputFormats()(0).mask)
+      _outputFormats(0).setScales(inputFormats()(0).scales)
+    }
+
     output = initTensor(_outputFormats(0))
     updateOutputPrimitives = Array(MklDnn.PrimitiveCreate2(fwdPD,
       _inputFormats.map(_.getPrimitive(runtime)), Array(0), 1,
@@ -102,7 +111,7 @@ class AvgPooling(
       strides, kernel, paddingTL, paddingBR, MklDnn.PaddingKind.mkldnnPaddingZero)
 
     val pd = MklDnn.PrimitiveDescCreate(description, runtime.engine, fwdPD)
-    _gradInputFormats = Array(MemoryData.primitiveGradInput(pd))
+    _gradInputFormats = Array(MemoryData.operationWant(pd, Query.DiffSrcPd))
     updateGradInputPrimitives = Array(MklDnn.PrimitiveCreate2(pd,
       _gradOutputFormats.map(_.getPrimitive(runtime)),
       Array(0, 0), 2, _gradInputFormats.map(_.getPrimitive(runtime)), 1))

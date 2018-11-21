@@ -33,11 +33,15 @@ class ReorderMemory(inputFormat: MemoryData, outputFormat: MemoryData,
 
   private def initMemory(src: MemoryData, shape: Array[Int], layout: Int)
     : Array[MemoryData] = {
-    src match {
-      case h: HeapData => Array(HeapData(shape, layout))
-      case n: NativeData => Array(NativeData(shape, layout))
+    val ret = src match {
+      case h: HeapData => Array(HeapData(shape, layout, src.dataType))
+      case n: NativeData => Array(NativeData(shape, layout, src.dataType))
       case _ => throw new UnsupportedOperationException("Not support such memory format")
     }
+
+    ret(0).setMask(src.mask)
+    ret(0).setScales(src.scales)
+    ret.asInstanceOf[Array[MemoryData]]
   }
 
   private def shapeToString(shape: Array[Int]): String = {
@@ -72,6 +76,7 @@ class ReorderMemory(inputFormat: MemoryData, outputFormat: MemoryData,
     val outputShape = _outputFormats(0).shape
     val inputLayout = _inputFormats(0).layout
     val outputLayout = _outputFormats(0).layout
+
     realInput = _inputFormats
     realOutput = _outputFormats
 
@@ -85,9 +90,37 @@ class ReorderMemory(inputFormat: MemoryData, outputFormat: MemoryData,
       }
     }
 
-    val fwdReorderPrimDesc = MklDnn.ReorderPrimitiveDescCreate(
-      realInput(0).getPrimitiveDescription(runtime),
-      realOutput(0).getPrimitiveDescription(runtime))
+    val needNotAttr = inputFormats()(0).dataType == DataType.F32 &&
+      outputFormats()(0).dataType == DataType.F32
+
+    val fwdReorderPrimDesc = if (needNotAttr) {
+      MklDnn.ReorderPrimitiveDescCreate(
+        realInput(0).getPrimitiveDescription(runtime),
+        realOutput(0).getPrimitiveDescription(runtime))
+    } else {
+      val attr = MklDnn.CreateAttr()
+      MklDnn.AttrSetIntOutputRoundMode(attr, 1)
+
+      if (realOutput(0).scales == null || !realOutput(0).scales.nonEmpty) {
+        if (realOutput(0).dataType == DataType.F32) {
+          realOutput(0).setScales(realInput(0).scales.map(1.0f / _))
+        } else {
+          realOutput(0).setScales(realInput(0).scales)
+        }
+        realOutput(0).setMask(realInput(0).mask)
+      }
+
+      require(realOutput(0).scales.nonEmpty)
+      require(realOutput(0).mask != -1)
+      MklDnn.AttrSetOutputScales(attr, realOutput(0).scales.length, realOutput(0).mask,
+        realOutput(0).scales)
+
+      MklDnn.ReorderPrimitiveDescCreateV2(
+        realInput(0).getPrimitiveDescription(runtime),
+        realOutput(0).getPrimitiveDescription(runtime),
+        attr)
+    }
+
     val fwdReorderPrim = MklDnn.PrimitiveCreate2(fwdReorderPrimDesc,
       Array(realInput(0).getPrimitive(runtime)), Array(0), 1,
       Array(realOutput(0).getPrimitive(runtime)), 1)
@@ -95,7 +128,9 @@ class ReorderMemory(inputFormat: MemoryData, outputFormat: MemoryData,
     updateOutputPrimitives = Array(fwdReorderPrim)
 
     // recover to original data
-    output = initTensor(realOutput(0))
+    output = initActivity(realOutput)
+    _inputFormats = realInput
+    _outputFormats = realOutput
 
     reshapeOutputIfNeeded(_outputFormats(0), output.toTensor[Float])
 
@@ -108,10 +143,6 @@ class ReorderMemory(inputFormat: MemoryData, outputFormat: MemoryData,
 
   override def getUpdateOutputMemoryPrimitives(): Array[Long] = {
     realInput.map(_.getPrimitive(runtime)) ++ realOutput.map(_.getPrimitive(runtime))
-  }
-  override def updateOutput(input: Activity): Activity = {
-    output = super.updateOutput(input)
-    output
   }
 
   override private[bigdl] def initBwdPrimitives(grads: Array[MemoryData], phase: Phase) = {

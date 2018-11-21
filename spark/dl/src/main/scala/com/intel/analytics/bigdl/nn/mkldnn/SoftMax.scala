@@ -116,7 +116,7 @@ class SoftMax() extends MklDnnLayer {
         MklDnnOps.streamSubmit(runtime.stream, 1,
           updateOutputPrimitives,
           updateOutputPrimitives.length,
-          updateOutputMemoryPrimitives, updateOutputTensors)
+          updateOutputMemoryPrimitives, updateOutputTensors.asInstanceOf[Array[Tensor[_]]])
     }
 
     output

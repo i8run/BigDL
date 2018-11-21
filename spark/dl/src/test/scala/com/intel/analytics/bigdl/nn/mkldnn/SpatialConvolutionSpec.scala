@@ -18,10 +18,11 @@ package com.intel.analytics.bigdl.nn.mkldnn
 
 import com.intel.analytics.bigdl._
 import com.intel.analytics.bigdl.mkl._
-import com.intel.analytics.bigdl.nn.mkldnn.Phase.TrainingPhase
-import com.intel.analytics.bigdl.nn.{Xavier, Zeros}
+import com.intel.analytics.bigdl.nn.abstractnn.Int8ScalesAndMask
+import com.intel.analytics.bigdl.nn.mkldnn.Phase.{InferencePhase, TrainingPhase}
+import com.intel.analytics.bigdl.nn.{Module, Xavier, Zeros}
 import com.intel.analytics.bigdl.numeric.NumericFloat
-import com.intel.analytics.bigdl.tensor.{DnnStorage, Tensor}
+import com.intel.analytics.bigdl.tensor.{DnnStorage, DnnTensor, Tensor}
 import com.intel.analytics.bigdl.utils.RandomGenerator._
 import org.apache.commons.lang3.SerializationUtils
 import org.scalatest.{FlatSpec, Matchers}
@@ -107,7 +108,7 @@ class SpatialConvolutionSpec extends FlatSpec with Matchers {
 
     val weight1 = conv.weight.dense
     val gradweight1 = conv.gradWeight.dense
-    val bias1 = Tools.dense(conv.bias.native).toTensor[Float]
+    val bias1 = Tools.dense(conv.bias.native[Float]).toTensor[Float]
     val gradbias1 = Tools.dense(conv.gradBias.dense).toTensor
 
     val output2 = layer.forward(input)
@@ -605,6 +606,204 @@ class SpatialConvolutionSpec extends FlatSpec with Matchers {
     Equivalent.nearequals(model.getParameters()._1, blas.getParameters()._1) should be (true)
     // control the epsilon to 1e-4, not 1e-5
     Equivalent.nearequals(model.getParameters()._2, blas.getParameters()._2, 1e-4) should be (true)
+  }
+
+  "quantized convolution" should "work correctly" in {
+    val inputShape = Array(4, 3, 5, 5)
+    val outputShape = Array(4, 2, 3, 3)
+    val nOutput = 2
+    val kernel = 3
+    val pad = 1
+    val stride = 2
+
+    val input = Tensor(inputShape).rand(0, 1)
+
+    val runtime = new MklDnnRuntime
+
+    val heapData = HeapData(inputShape, Memory.Format.nchw, DataType.F32)
+    val nativeData = NativeData(Array(4, 3, 5, 5), Memory.Format.nhwc, DataType.U8)
+    val inputScales = Array(input.max())
+
+    heapData.setMask(0)
+    heapData.setScales(inputScales)
+
+    val reorder = ReorderMemory(nativeData)
+    reorder.setRuntime(runtime)
+    reorder.initFwdPrimitives(Array(heapData), InferencePhase)
+
+    val reorderedInput = reorder.forward(input)
+
+    {
+      val len = inputShape.product
+      val output = new Array[Byte](len)
+      Memory.CopyPtr2ByteArray(reorderedInput.asInstanceOf[DnnTensor[Byte]].storageAddress(),
+        0, output, 0, len, 1)
+      output.foreach(println)
+    }
+
+    val initWeight1 = Tensor(Array(nOutput, inputShape(1), kernel, kernel)).rand(-1, 1)
+    val initWeight2 = Tensor(Array(nOutput, inputShape(1), kernel, kernel)).rand(-1, 1)
+    val initBias1 = Tensor(nOutput).rand(-1, 1)
+    val initBias2 = Tensor(nOutput).rand(-1, 1)
+
+    val conv1 = new SpatialConvolution(3, nOutput, kernel, kernel, stride, stride, pad, pad, 1,
+      initWeight = initWeight1, initBias = initBias1)
+    conv1.evaluate()
+    conv1.setRuntime(runtime)
+    conv1.initFwdPrimitives(Array(nativeData), InferencePhase)
+    conv1.forward(reorderedInput)
+
+    {
+      val len = outputShape.product
+      val output = new Array[Byte](len)
+      Memory.CopyPtr2ByteArray(conv1.output.asInstanceOf[DnnTensor[Byte]].storageAddress(),
+        0, output, 0, len, 1)
+      output.foreach(println)
+    }
+
+    val heapData2 = HeapData(outputShape, Memory.Format.nchw, DataType.F32)
+    val reorder2 = ReorderMemory(heapData2)
+    reorder2.setRuntime(runtime)
+    reorder2.initFwdPrimitives(conv1.outputFormats(), InferencePhase)
+    reorder2.forward(conv1.output)
+
+    println(reorder2.output)
+
+  }
+
+//  "conv quantization" should "work correctly" in {
+//    System.setProperty("bigdl.mkldnn.fusion.convrelu", "true")
+//    RNG.setSeed(1)
+//    val inputShape = Array(1, 2, 12, 12)
+//    val outputShape = Array(1, 8)
+//    val model = Sequential()
+//      .add(Input(inputShape, Memory.Format.nchw))
+//      .add(SpatialConvolution(2, 4, 5, 5).setName("conv2"))
+//      .add(ReLU()).setName("relu")
+//      .add(MaxPooling(2, 2, 2, 2).setName("pool2"))
+//      .add(Linear(4 * 4 * 4, 8).setName("ip1"))
+//      .add(ReorderMemory(HeapData(outputShape, Memory.Format.nc)))
+//    model.evaluate()
+//
+//    val input = Tensor[Float](inputShape).rand(-100, 100)
+//    model.compile(InferencePhase)
+//    println(model.forward(input))
+//    val quantized = model.quantize(Array(input))
+//
+//    quantized.forward(input)
+//    println(quantized.output)
+//    System.clearProperty("bigdl.mkldnn.fusion.convrelu")
+//  }
+
+  "unsigned input quantization" should "work correctly" in {
+    RNG.setSeed(1)
+
+    val inputShape = Array(1, 2, 12, 12)
+    val outputShape = Array(1, 4, 8, 8)
+
+    val initBias = Tensor[Float](4).fill(1.0f)
+
+    val model = Sequential()
+      .add(Input(inputShape, Memory.Format.nchw))
+      .add(SpatialConvolution(2, 4, 5, 5, initBias = initBias)).setName("conv2")
+      .add(ReorderMemory(HeapData(outputShape, Memory.Format.nchw)))
+
+    model.evaluate()
+    val input = Tensor[Float](inputShape).rand(-128, 127)
+    model.compile(InferencePhase)
+    println(model.forward(input))
+    model.generateScalesWithMask(input, Int8ScalesAndMask.SINGLE_SCALE, 2)
+
+    val quantized = model.quantize()
+    quantized.forward(input)
+    println(quantized.output)
+  }
+
+  "generate the convolution scales" should "work correctly" in {
+    val inputShape = Array(1, 1, 2, 2)
+    val outputShape = Array(1, 2, 1, 1)
+
+    val inputData = Array[Float](-100, 12, 14, 67)
+    val input = Tensor[Float](inputData, inputShape)
+
+    val initWeight = Tensor[Float](
+      Array[Float](2, -16, 48, 23, -37, 24, -11, -13),
+      Array(2, 1, 2, 2))
+    val initBias = Tensor[Float](Array[Float](-10, 3), Array(2))
+
+    val conv = SpatialConvolution(1, 2, 2, 2, initWeight = initWeight, initBias = initBias)
+
+    val seq = Sequential()
+      .add(Input(inputShape, Memory.Format.nchw))
+      .add(conv)
+      .add(ReorderMemory(HeapData(outputShape, Memory.Format.nchw)))
+
+    seq.compile(InferencePhase)
+    seq.forward(input)
+
+    seq.generateScalesWithMask(input, Int8ScalesAndMask.SINGLE_SCALE, 2)
+
+    val outputFP32Model = seq.forward(input).toTensor.clone()
+
+    val quantizedModel = seq.quantize()
+
+    val outputInt8Model = quantizedModel.forward(input).toTensor.clone()
+
+    println(outputFP32Model)
+    println(outputInt8Model)
+  }
+
+  "generate the convolution scales with random" should "work correctly" in {
+    RNG.setSeed(1)
+    val inputShape = Array(1, 1, 2, 2)
+    val outputShape = Array(1, 2, 1, 1)
+
+    val inputData = Array[Float](-100, 12, 14, 67)
+    val input = Tensor[Float](inputShape).rand(-100, 100)
+
+    val initWeight = Tensor[Float](Array(2, 1, 2, 2)).rand(-10, 10)
+    val initBias = Tensor[Float](Array(2)).rand(-1, 1)
+
+    val conv = SpatialConvolution(1, 2, 2, 2)
+
+    val seq = Sequential()
+      .add(Input(inputShape, Memory.Format.nchw))
+      .add(conv)
+      .add(ReorderMemory(HeapData(outputShape, Memory.Format.nchw)))
+
+    seq.compile(InferencePhase)
+    seq.forward(input)
+
+    seq.generateScalesWithMask(input, Int8ScalesAndMask.SINGLE_SCALE, 2)
+
+    val outputFP32Model = seq.forward(input).toTensor.clone()
+
+    val quantizedModel = seq.quantize()
+
+    val outputInt8Model = quantizedModel.forward(input).toTensor.clone()
+
+    println(outputFP32Model)
+    println(outputInt8Model)
+
+    outputFP32Model.storage().array().zip(outputInt8Model.storage().array()).foreach { x =>
+      (Math.abs(x._1 - x._2) / Math.max(Math.abs(x._1), Math.abs(x._2)) <= 1e-1) should be (true)
+    }
+  }
+
+  "load lenet5 and quantize" should "work correctly" in {
+    System.setProperty("bigdl.mkldnn.fusion.convbn", "true")
+    val input = Tensor[Float](100, 1, 28, 28).rand(-0.42, 2.8)
+    val model = Module.load[Float]("/tmp/lenet/current/model.1801")
+
+    model.evaluate()
+    model.asInstanceOf[Sequential].compile(InferencePhase)
+    model.forward(input)
+    model.asInstanceOf[Sequential].generateScalesWithMask(input, 0, 2)
+    model.release()
+
+    val quant = model.quantize()
+    quant.forward(input)
+    System.clearProperty("bigdl.mkldnn.fusion.convbn")
   }
 
   def prototxt(inputShape: Array[Int], name: String,

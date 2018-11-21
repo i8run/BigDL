@@ -19,10 +19,14 @@ package com.intel.analytics.bigdl.utils.intermediate
 import com.intel.analytics.bigdl.mkl.Memory
 import com.intel.analytics.bigdl.nn.{Graph, SpatialMaxPooling, keras}
 import com.intel.analytics.bigdl.nn.abstractnn.{AbstractModule, Activity, DataFormat}
+import com.intel.analytics.bigdl.nn.mkldnn.Phase.{InferencePhase, TrainingPhase}
 import com.intel.analytics.bigdl.nn.mkldnn._
 import com.intel.analytics.bigdl.tensor.Tensor
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
-import com.intel.analytics.bigdl.utils.{Engine, MklBlas, Node, T}
+import com.intel.analytics.bigdl.utils._
+
+import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
 /**
@@ -137,6 +141,7 @@ private[bigdl] class IRGraph[T: ClassTag](
         })
       }
       val dnnGraph = graph.asInstanceOf[DnnGraph]
+      val phase = if (isTraining()) TrainingPhase else InferencePhase
       dnnGraph.setRuntime(new MklDnnRuntime())
       dnnGraph.initFwdPrimitives(inputMemory)
       if (dnnGraph.isTraining()) {

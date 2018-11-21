@@ -19,6 +19,7 @@ package com.intel.analytics.bigdl.models.lenet
 import com.intel.analytics.bigdl._
 import com.intel.analytics.bigdl.dataset.DataSet
 import com.intel.analytics.bigdl.dataset.image.{BytesToGreyImg, GreyImgNormalizer, GreyImgToBatch}
+import com.intel.analytics.bigdl.nn.mkldnn.Phase.TrainingPhase
 import com.intel.analytics.bigdl.nn.{ClassNLLCriterion, CrossEntropyCriterion, Module}
 import com.intel.analytics.bigdl.numeric.NumericFloat
 import com.intel.analytics.bigdl.optim._
@@ -53,7 +54,9 @@ object Train {
         } else {
           Engine.getEngineType() match {
             case MklBlas => LeNet5(10)
-            case MklDnn => LeNet5.dnnGraph(param.batchSize / Engine.nodeNumber(), 10)
+            case MklDnn =>
+              val lenet = LeNet5.dnn(param.batchSize / Engine.nodeNumber(), 10)
+              lenet
           }
         }
       }

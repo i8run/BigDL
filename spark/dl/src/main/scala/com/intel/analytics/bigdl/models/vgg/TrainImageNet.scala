@@ -55,7 +55,7 @@ object TrainImageNet {
           case MklBlas =>
             Vgg_16(classNumber)
           case MklDnn =>
-            nn.mkldnn.models.Vgg_16.graph(batchSize / Engine.nodeNumber(), classNumber)
+            nn.mkldnn.models.Vgg_16(batchSize / Engine.nodeNumber(), classNumber)
         }
       }
 
@@ -108,6 +108,7 @@ object TrainImageNet {
         .setValidation(validationTrigger, validateSet, validationMethods)
         .setEndWhen(Trigger.severalIteration(param.maxIteration))
         .optimize()
+
 
       sc.stop()
     })

@@ -23,7 +23,7 @@ import com.intel.analytics.bigdl.nn._
 import com.intel.analytics.bigdl.nn.abstractnn.Activity
 import com.intel.analytics.bigdl.nn.mkldnn.Phase.{InferencePhase, TrainingPhase}
 import com.intel.analytics.bigdl.nn.mkldnn.ResNet.DatasetType.ImageNet
-import com.intel.analytics.bigdl.nn.mkldnn.models.Vgg_16
+import com.intel.analytics.bigdl.nn.mkldnn.models.{Inception_v1_NoAuxClassifier, Vgg_16}
 import com.intel.analytics.bigdl.numeric.NumericFloat
 import com.intel.analytics.bigdl.tensor.Tensor
 import com.intel.analytics.bigdl.tensor.TensorNumericMath.TensorNumeric
@@ -51,6 +51,13 @@ object Perf {
     opt[Boolean]('t', "training")
       .text(s"Perf test training or testing")
       .action((v, p) => p.copy(training = v))
+    opt[Boolean]('q', "quantize")
+      .text("Quantize the FP32 model")
+      .action((v, p) => p.copy(quantize = v))
+    checkConfig( c =>
+      if (c.quantize && c.training) failure("traing mode doesn't support quantized model")
+      else success
+    )
   }
 
   def main(argv: Array[String]): Unit = {
@@ -64,6 +71,7 @@ object Perf {
     Engine.init
 
     parser.parse(argv, new ResNet50PerfParams()).foreach { params =>
+      RNG.setSeed(1)
       val batchSize = params.batchSize
       val training = params.training
       val iterations = params.iteration
@@ -72,39 +80,73 @@ object Perf {
 
       val inputFormat = Memory.Format.nchw
       val inputShape = Array(batchSize, 3, 224, 224)
-      val input = Tensor(inputShape).rand()
+      val input = Tensor(inputShape).apply1(_ => RNG.uniform(-124, 151).toInt.toFloat)
       val label = Tensor(batchSize).apply1(_ => Math.ceil(RNG.uniform(0, 1) * 1000).toFloat)
 
-      val model = params.model match {
-        case "vgg16" => Vgg_16(batchSize, classNum, true)
+      val fp32Model = params.model match {
+        case "vgg16" => Vgg_16(batchSize, classNum)
         case "resnet50" => ResNet(batchSize, classNum, T("depth" -> 50, "dataSet" -> ImageNet))
-        case "vgg16_graph" => Vgg_16.graph(batchSize, classNum, true)
+        case "inception_v1" => Inception_v1_NoAuxClassifier(batchSize, classNum)
+        case "vgg16_graph" =>
+          com.intel.analytics.bigdl.models.vgg.Vgg_16.fusionGraph(1000)
+        // Vgg_16.fusionGraph(batchSize, classNum, false)
         case "resnet50_graph" =>
           ResNet.graph(batchSize, classNum, T("depth" -> 50, "dataSet" -> ImageNet))
         case _ => throw new UnsupportedOperationException(s"Unkown model ${params.model}")
       }
 
+      if (!params.training) {
+        fp32Model.evaluate()
+      }
+
+      val inputs = new Array[Tensor[Float]](2)
+      for (i <- 0 until 2) {
+        inputs(i) = Tensor[Float](inputShape).apply1(_ => RNG.uniform(-124, 151).toInt.toFloat)
+      }
+
       val criterion = CrossEntropyCriterion()
 
-      Engine.dnnComputing.invokeAndWait2(Array(1).map(_ => () => {
-        if (training) {
-          model.training()
-          if (model.isInstanceOf[MklDnnContainer]) {
-            model.asInstanceOf[MklDnnContainer]
-              .compile(TrainingPhase, Array(HeapData(inputShape, inputFormat)))
-          } else if (model.isInstanceOf[DnnGraph]) {
-            model.asInstanceOf[DnnGraph].compile(TrainingPhase)
+      // FIXME so urgly
+      val model = if (!params.quantize) {
+        val model = fp32Model
+        Engine.dnnComputing.invokeAndWait2(Array(1).map(_ => () => {
+          if (training) {
+            if (model.isInstanceOf[MklDnnContainer]) {
+              model.asInstanceOf[MklDnnContainer]
+                .compile(TrainingPhase, Array(HeapData(inputShape, inputFormat)))
+            } else if (model.isInstanceOf[DnnGraph]) {
+              model.asInstanceOf[DnnGraph].compile(TrainingPhase)
+            }
+            model.training()
+          } else {
+            if (model.isInstanceOf[MklDnnContainer]) {
+              model.asInstanceOf[MklDnnContainer]
+                .compile(InferencePhase, Array(HeapData(inputShape, inputFormat)))
+            } else if (model.isInstanceOf[DnnGraph]) {
+              model.asInstanceOf[DnnGraph].compile(InferencePhase)
+            }
+            model.evaluate()
           }
-        } else {
-          model.evaluate()
-          if (model.isInstanceOf[MklDnnContainer]) {
-            model.asInstanceOf[MklDnnContainer]
-              .compile(InferencePhase, Array(HeapData(inputShape, inputFormat)))
-          } else if (model.isInstanceOf[DnnGraph]) {
-            model.asInstanceOf[DnnGraph].compile(InferencePhase)
+        }))
+        model
+      } else {
+        Engine.dnnComputing.invokeAndWait2(Array(1).map(_ => () => {
+          fp32Model.asInstanceOf[Sequential].compile(InferencePhase)
+          inputs.foreach { input =>
+            fp32Model.forward(input)
+            fp32Model.asInstanceOf[Sequential].generateScalesWithMask(input, 0, 2)
           }
-        }
-      }))
+        }))
+        fp32Model.release()
+        val newModel = fp32Model.quantize()
+
+        println("=" * 80)
+
+        Engine.dnnComputing.invokeAndWait2(Array(1).map(_ => () => {
+          newModel.asInstanceOf[Sequential].compile(InferencePhase)
+        }))
+        newModel
+      }
 
       var iteration = 0
       while (iteration < iterations) {
@@ -127,15 +169,18 @@ object Perf {
 
         iteration += 1
       }
+
+      model.getTimes.sortBy(_._3).foreach(x => println(x._1.getClass.getSimpleName, x._2, x._3))
     }
   }
 }
 
 case class ResNet50PerfParams (
   batchSize: Int = 16,
-  iteration: Int = 50,
-  training: Boolean = true,
-  model: String = "vgg16"
+  iteration: Int = 10,
+  training: Boolean = false,
+  quantize: Boolean = true,
+  model: String = "resnet50"
 )
 
 object ResNet {
@@ -402,7 +447,7 @@ object ResNet {
       val output = ReorderMemory(HeapData(Array(batchSize, classNum), Memory.Format.nc)).inputs(fc)
 
       val model = DnnGraph(Array(input), Array(output))
-      modelInit(model)
+      model.reset()
       model
     } else {
       throw new IllegalArgumentException(s"Invalid dataset ${dataSet}")

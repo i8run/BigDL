@@ -17,6 +17,7 @@ package com.intel.analytics.bigdl.nn.mkldnn
 
 import com.intel.analytics.bigdl.mkl.{DataType, Memory, MklDnn}
 import com.intel.analytics.bigdl.nn.abstractnn.Activity
+import com.intel.analytics.bigdl.nn.mkldnn.Phase.InferencePhase
 import com.intel.analytics.bigdl.utils.T
 
 class CAddTable extends MklDnnLayer {
@@ -25,16 +26,21 @@ class CAddTable extends MklDnnLayer {
     val shape = inputs(0).shape.clone()
     for(i <- 1 until inputs.length) {
       require(shape.length == inputs(i).shape.length, "dimension not match")
+      require(inputs(i).layout == inputs(0).layout, "layout not match")
       for(j <- 0 until shape.length) {
         require(shape(j) == inputs(i).shape(j), "size not match")
       }
     }
 
-    val outputMD = MklDnn.MemoryDescInit(shape.length, shape, DataType.F32, Memory.Format.any)
-    val scales = inputs.map(_ => 1f)
+    val outputMD = MklDnn.MemoryDescInit(shape.length, shape, inputs(0).dataType, Memory.Format.any)
+
+    val scales = inputs.map(x => if (x.scales.nonEmpty) x.scales(0) / inputs(0).scales(0) else 1.0f)
+
     val pd = MklDnn.SumPrimitiveDescCreate(outputMD, inputs.length, scales,
       inputs.map(_.getPrimitiveDescription(runtime)))
     _outputFormats = Array(MemoryData.primitiveOutput(pd))
+    _outputFormats(0).setMask(0)
+    _outputFormats(0).setScales(inputs(0).scales)
     updateOutputPrimitives = Array(MklDnn.PrimitiveCreate2(pd,
       _inputFormats.map(_.getPrimitive(runtime)), new Array[Int](inputs.length),
       _inputFormats.length, _outputFormats.map(_.getPrimitive(runtime)), 1))
@@ -59,6 +65,20 @@ class CAddTable extends MklDnnLayer {
       i += 1
     }
     gradInput
+  }
+
+  override def generateInAndOutScales(input: Activity, inAndOutMask: Int): Unit = {
+    val defaultOutput = HeapData(outputFormats()(0).shape, Memory.Format.nchw)
+
+    val outputReorder = ReorderMemory(defaultOutput)
+    outputReorder.setRuntime(runtime)
+    outputReorder.initFwdPrimitives(outputFormats(), InferencePhase)
+
+    val maxOut = outputReorder.forward(output).toTensor[Float].abs().max
+
+    scalesOfOutput.update(Array(maxOut), 0)
+
+    outputReorder.release()
   }
 }
 

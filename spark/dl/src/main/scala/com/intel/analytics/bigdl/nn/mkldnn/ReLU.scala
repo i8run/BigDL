@@ -15,7 +15,9 @@
  */
 package com.intel.analytics.bigdl.nn.mkldnn
 
-import com.intel.analytics.bigdl.mkl.{AlgKind, MklDnn, PropKind, Query}
+import com.intel.analytics.bigdl.mkl._
+import com.intel.analytics.bigdl.nn.abstractnn.Activity
+import com.intel.analytics.bigdl.nn.mkldnn.Phase.InferencePhase
 
 class ReLU(value: Float = 0.0f) extends MklDnnLayer {
   private val UNDEFINED: Long = 0
@@ -33,6 +35,10 @@ class ReLU(value: Float = 0.0f) extends MklDnnLayer {
         Array(_inputFormats(0).getPrimitive(runtime)), Array(0), _inputFormats.length,
         _outputFormats.map(_.getPrimitive(runtime)), _outputFormats.length)
     )
+    if (inputs(0).scales.nonEmpty) {
+      _outputFormats(0).setMask(inputs(0).mask)
+      _outputFormats(0).setScales(inputs(0).scales)
+    }
     output = initTensor(_outputFormats(0))
     (_inputFormats, _outputFormats)
   }
@@ -45,13 +51,38 @@ class ReLU(value: Float = 0.0f) extends MklDnnLayer {
       value, 0)
     require(fwdPrimDesc != UNDEFINED, "You should call initFwdPrimitives first")
     val primDesc = MklDnn.PrimitiveDescCreate(description, runtime.engine, fwdPrimDesc)
-    _gradInputFormats = Array(MemoryData.primitiveGradInput(primDesc))
+    _gradInputFormats = Array(MemoryData.operationWant(primDesc, Query.DiffSrcPd))
     updateGradInputPrimitives = Array(
       MklDnn.PrimitiveCreate2(primDesc, Array(_inputFormats(0),
         _gradOutputFormats(0)).map(_.getPrimitive(runtime)), Array(0), 2,
         _gradInputFormats.map(_.getPrimitive(runtime)), _gradInputFormats.length))
     gradInput = initTensor(_gradInputFormats(0))
     (_gradOutputFormats, _gradInputFormats)
+  }
+
+  override def generateInAndOutScales(input: Activity, inAndOutMask: Int): Unit = {
+    val defaultInput = HeapData(inputFormats()(0).shape, Memory.Format.nchw)
+    val defaultOutput = HeapData(outputFormats()(0).shape, Memory.Format.nchw)
+
+    val inputReorder = ReorderMemory(defaultInput)
+    inputReorder.setRuntime(runtime)
+    inputReorder.initFwdPrimitives(inputFormats(), InferencePhase)
+
+    val outputReorder = ReorderMemory(defaultOutput)
+    outputReorder.setRuntime(runtime)
+    outputReorder.initFwdPrimitives(outputFormats(), InferencePhase)
+
+    val defaultInputData = inputReorder.forward(input).toTensor[Float]
+    val maxIn = defaultInputData.abs().max()
+
+    scalesOfInput.update(Array(maxIn), 0)
+
+    val maxOut = outputReorder.forward(output).toTensor[Float].abs().max
+
+    scalesOfOutput.update(Array(maxOut), 0)
+
+    inputReorder.release()
+    outputReorder.release()
   }
 }
 

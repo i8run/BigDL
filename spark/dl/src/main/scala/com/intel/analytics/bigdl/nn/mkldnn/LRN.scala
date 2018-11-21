@@ -15,8 +15,9 @@
  */
 package com.intel.analytics.bigdl.nn.mkldnn
 
-import com.intel.analytics.bigdl.mkl.{AlgKind, MklDnn, PropKind}
+import com.intel.analytics.bigdl.mkl._
 import com.intel.analytics.bigdl.nn.abstractnn.Activity
+import com.intel.analytics.bigdl.nn.mkldnn.Phase.{InferencePhase, TrainingPhase}
 import com.intel.analytics.bigdl.tensor.Tensor
 
 class LRN(
@@ -34,20 +35,43 @@ class LRN(
   @transient private var bwdMemPrims: Array[Long] = _
 
   override private[mkldnn] def initFwdPrimitives(inputs: Array[MemoryData], phase: Phase) = {
-    _inputFormats = singleNativeData(inputs)
+    _inputFormats = Array(NativeData(inputs(0).shape, inputs(0).layout, DataType.F32))
+
     val description = MklDnn.LRNForwardDescInit(
-      PropKind.ForwardTraining, AlgKind.LrnAcrossChannels,
+      PropKind.ForwardScoring, AlgKind.LrnAcrossChannels,
       _inputFormats(0).getMemoryDescription(), size, alpha.toFloat, beta.toFloat, k.toFloat)
     fwdPrimDesc = MklDnn.PrimitiveDescCreate(description, runtime.engine, 0L)
-    _outputFormats = Array(MemoryData.primitiveOutput(fwdPrimDesc))
-    workSpaceFormat = MemoryData.primitiveWorkSpace(fwdPrimDesc)
-    workSpace = initTensor(workSpaceFormat)
+    if (inputFormats()(0).mask != -1) {
+      val mask = inputFormats()(0).mask
+      val scales = inputFormats()(0).scales
+      _outputFormats = Array(MemoryData.primitiveOutput(fwdPrimDesc))
+      _outputFormats(0).setMask(mask)
+      _outputFormats(0).setScales(scales)
+    } else {
+      _outputFormats = Array(MemoryData.primitiveOutput(fwdPrimDesc))
+    }
+
+    println(s"${getName()}")
+    val outputs = if (phase == TrainingPhase) {
+      workSpaceFormat = MemoryData.operationWant(fwdPrimDesc, Query.WorkspacePd)
+      workSpace = initTensor(workSpaceFormat).asInstanceOf[Tensor[Float]]
+      Array(_outputFormats(0), workSpaceFormat)
+    } else {
+      Array(_outputFormats(0))
+    }
+
     updateOutputPrimitives = Array(MklDnn.PrimitiveCreate2(fwdPrimDesc,
-      _inputFormats.map(_.getPrimitive(runtime)), Array(0), 1, Array(_outputFormats(0),
-        workSpaceFormat).map(_.getPrimitive(runtime)), 2))
+      _inputFormats.map(_.getPrimitive(runtime)), Array(0), 1,
+      outputs.map(_.getPrimitive(runtime)), outputs.length))
     output = initTensor(_outputFormats(0))
-    fwdMemPrims = Array(_inputFormats(0), _outputFormats(0), workSpaceFormat)
-      .map(_.getPrimitive(runtime))
+
+    fwdMemPrims = if (phase == InferencePhase) {
+      Array(_inputFormats(0), _outputFormats(0))
+        .map(_.getPrimitive(runtime))
+    } else {
+      Array(_inputFormats(0), _outputFormats(0), workSpaceFormat)
+        .map(_.getPrimitive(runtime))
+    }
     (_inputFormats, _outputFormats)
   }
 
@@ -59,7 +83,7 @@ class LRN(
       _gradOutputFormats(0).getMemoryDescription(), size, alpha.toFloat, beta.toFloat, k.toFloat)
     require(fwdPrimDesc != UNDEFINED, "You should call initFwdPrimitives first")
     val primDesc = MklDnn.PrimitiveDescCreate(description, runtime.engine, fwdPrimDesc)
-    _gradInputFormats = Array(MemoryData.primitiveGradInput(primDesc))
+    _gradInputFormats = Array(MemoryData.operationWant(primDesc, Query.DiffSrcPd))
     updateGradInputPrimitives = Array(MklDnn.PrimitiveCreate2(primDesc,
       Array(_inputFormats(0), _gradOutputFormats(0), workSpaceFormat).map(_.getPrimitive(runtime)),
       Array(0, 0, 0), 3, _gradInputFormats.map(_.getPrimitive(runtime)), 1))
@@ -70,9 +94,10 @@ class LRN(
   }
 
   override def updateOutput(input: Activity): Activity = {
-    val buffer = Array(input.asInstanceOf[Tensor[Float]], output.asInstanceOf[Tensor[Float]],
-      workSpace)
-    MklDnnOps.streamSubmit(runtime.stream, 1, updateOutputPrimitives, 1, fwdMemPrims, buffer)
+    // todo add back workspace
+    val buffer = Array(input.asInstanceOf[Tensor[Float]], output.asInstanceOf[Tensor[Float]])
+    MklDnnOps.streamSubmit(runtime.stream, 1, updateOutputPrimitives, 1, fwdMemPrims,
+      buffer.asInstanceOf[Array[Tensor[_]]])
     output
   }
 
@@ -81,7 +106,7 @@ class LRN(
       input.asInstanceOf[Tensor[Float]], gradOutput.asInstanceOf[Tensor[Float]], workSpace,
       gradInput.asInstanceOf[Tensor[Float]])
     MklDnnOps.streamSubmit(runtime.stream, 1, updateGradInputPrimitives, 1,
-      bwdMemPrims, buffer)
+      bwdMemPrims, buffer.asInstanceOf[Array[Tensor[_]]])
     gradInput
   }
 }

@@ -16,23 +16,16 @@
 
 package com.intel.analytics.bigdl.models.lenet
 
-import java.nio.file.Paths
-
-import com.intel.analytics.bigdl.dataset.{DataSet, SampleToMiniBatch}
+import com.intel.analytics.bigdl.dataset.SampleToMiniBatch
 import com.intel.analytics.bigdl.dataset.image.{BytesToGreyImg, GreyImgNormalizer, GreyImgToSample}
 import com.intel.analytics.bigdl.nn.Module
 import com.intel.analytics.bigdl.nn.mkldnn.Phase.InferencePhase
 import com.intel.analytics.bigdl.nn.mkldnn.Sequential
-import com.intel.analytics.bigdl.optim.Top1Accuracy
-import com.intel.analytics.bigdl.utils.{Engine, MklDnn}
+import com.intel.analytics.bigdl.utils.Engine
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.SparkContext
 
-object Test {
-  System.setProperty("bigdl.mkldnn.fusion.convbn", "true")
-  System.setProperty("bigdl.mkldnn.fusion.bnrelu", "true")
-  System.setProperty("bigdl.mkldnn.fusion.convrelu", "true")
-  System.setProperty("bigdl.mkldnn.fusion.convsum", "true")
+object Quantize {
   Logger.getLogger("org").setLevel(Level.ERROR)
   Logger.getLogger("akka").setLevel(Level.ERROR)
   Logger.getLogger("breeze").setLevel(Level.ERROR)
@@ -54,20 +47,28 @@ object Test {
       val partitionNum = Engine.nodeNumber() * Engine.coreNumber()
       val rddData = sc.parallelize(load(validationData, validationLabel), partitionNum)
       val transformer =
-        BytesToGreyImg(28, 28) -> GreyImgNormalizer(testMean, testStd) -> GreyImgToSample()
+        BytesToGreyImg(28, 28) ->
+          GreyImgNormalizer(testMean, testStd) ->
+          GreyImgToSample() ->
+          SampleToMiniBatch(100)
       val evaluationSet = transformer(rddData)
 
-      val model = if (param.quantize) {
-        Module.load[Float](param.model).quantize()
-      } else {
-        Module.load[Float](param.model)
+      val samples = evaluationSet.take(2).map(_.getInput().toTensor[Float])
+
+      val model = Module.load[Float](param.model)
+      model.evaluate()
+      model.asInstanceOf[Sequential].compile(InferencePhase)
+
+      samples.foreach { sample =>
+        model.forward(sample)
+        model.asInstanceOf[Sequential].generateScalesWithMask(sample, 0, 2)
       }
 
-      val result = model.evaluate(evaluationSet,
-        Array(new Top1Accuracy[Float]), Some(param.batchSize))
+      model.release()
+      model.save(path = param.model.concat(".quantized"), overWrite = true)
 
-      result.foreach(r => println(s"${r._2} is ${r._1}"))
       sc.stop()
     }
   }
 }
+

@@ -107,7 +107,8 @@ object Utils {
   case class TestParams(
     folder: String = "./",
     model: String = "",
-    batchSize: Int = 128
+    batchSize: Int = 128,
+    quantize: Boolean = false
   )
 
   val testParser = new OptionParser[TestParams]("BigDL ResNet on Cifar10 Test Example") {
@@ -123,6 +124,9 @@ object Utils {
     opt[Int]('b', "batchSize")
       .text("batch size")
       .action((x, c) => c.copy(batchSize = x))
+    opt[Boolean]('q', "quantize")
+      .text("quantize the model")
+      .action((x, c) => c.copy(quantize = x))
   }
 
   private[bigdl] def loadTrain(dataFile: String): Array[ByteRecord] = {

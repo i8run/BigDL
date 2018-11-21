@@ -59,9 +59,13 @@ object TrainImageNet {
       val (imageSize, dataSetType, maxEpoch, dataSet) =
         (224, DatasetType.ImageNet, param.nepochs, ImageNetDataSet)
 
+      logger.info("start set data set")
+
       val trainDataSet = dataSet.trainDataSet(param.folder + "/train", sc, imageSize, batchSize)
+      logger.info("start val data set")
 
       val validateSet = dataSet.valDataSet(param.folder + "/val", sc, imageSize, batchSize)
+      logger.info("end set data set")
 
       val shortcut: ShortcutType = ShortcutType.B
 
@@ -90,8 +94,11 @@ object TrainImageNet {
 
             curModel
           case MklDnn =>
-            nn.mkldnn.ResNet.graph(param.batchSize / Engine.nodeNumber(), param.classes,
+            logger.info("before create ResNet")
+            val m = nn.mkldnn.ResNet.graph(param.batchSize / Engine.nodeNumber(), param.classes,
               T("depth" -> 50, "dataSet" -> ImageNet))
+            logger.info("end create ResNet")
+            m
         }
       }
 
