@@ -15,14 +15,13 @@
  */
 package com.intel.analytics.bigdl.nn.mkldnn
 
-import com.intel.analytics.bigdl.mkl.{DataType, Memory, MklDnn}
+import com.intel.analytics.bigdl.mkl.DataType
 import com.intel.analytics.bigdl.nn.DynamicContainer
-import com.intel.analytics.bigdl.nn.abstractnn.{AbstractModule, Activity, Int8ScalesAndMask}
+import com.intel.analytics.bigdl.nn.abstractnn.{AbstractModule, Activity}
 import com.intel.analytics.bigdl.tensor.{DenseType, DnnTensor, MklDnnType, Tensor}
 import com.intel.analytics.bigdl.utils.T
 
 import scala.collection.mutable.ArrayBuffer
-import scala.reflect.ClassTag
 
 /**
  * Helper utilities when integrating Module with MKL-DNN

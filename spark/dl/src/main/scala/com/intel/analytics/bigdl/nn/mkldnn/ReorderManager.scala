@@ -110,20 +110,6 @@ private[mkldnn] class ReorderManager() {
     }
   }
 
-  def delete(from: Array[MemoryData], to: Array[MemoryData]): Unit = {
-    if (from.length == 1) {
-      val mId = System.identityHashCode(from(0))
-      reorders.remove((mId, to(0)))
-    } else {
-      var i = 0
-      while(i < from.length) {
-        val mId = System.identityHashCode(from(i))
-        reorders.remove((mId, to(i)))
-        i += 1
-      }
-    }
-  }
-
   def release(): Unit = {
     reorders.values.foreach(_.release())
   }

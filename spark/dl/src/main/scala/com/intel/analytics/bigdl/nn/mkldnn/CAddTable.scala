@@ -26,7 +26,6 @@ class CAddTable extends MklDnnLayer {
     val shape = inputs(0).shape.clone()
     for(i <- 1 until inputs.length) {
       require(shape.length == inputs(i).shape.length, "dimension not match")
-      require(inputs(i).layout == inputs(0).layout, "layout not match")
       for(j <- 0 until shape.length) {
         require(shape(j) == inputs(i).shape(j), "size not match")
       }
@@ -39,8 +38,6 @@ class CAddTable extends MklDnnLayer {
     val pd = MklDnn.SumPrimitiveDescCreate(outputMD, inputs.length, scales,
       inputs.map(_.getPrimitiveDescription(runtime)))
     _outputFormats = Array(MemoryData.primitiveOutput(pd))
-    _outputFormats(0).setMask(0)
-    _outputFormats(0).setScales(inputs(0).scales)
     updateOutputPrimitives = Array(MklDnn.PrimitiveCreate2(pd,
       _inputFormats.map(_.getPrimitive(runtime)), new Array[Int](inputs.length),
       _inputFormats.length, _outputFormats.map(_.getPrimitive(runtime)), 1))

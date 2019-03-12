@@ -21,7 +21,7 @@ import com.intel.analytics.bigdl.nn.{ConstInitMethod, Xavier, Zeros}
 import com.intel.analytics.bigdl.nn.mkldnn._
 
 object Vgg_16 {
-  def apply(batchSize: Int, classNum: Int, hasDropout: Boolean = false): Sequential = {
+  def apply(batchSize: Int, classNum: Int, hasDropout: Boolean = true): Sequential = {
     val model = Sequential()
     model.add(Input(Array(batchSize, 3, 224, 224), Memory.Format.nchw))
     model.add(Conv(3, 64, 3, 3, 1, 1, 1, 1).setName("conv1_1"))
@@ -128,54 +128,6 @@ object Vgg_16 {
     val conv5_3 = Conv(512, 512, 3, 3, 1, 1, 1, 1).setName("conv5_3").inputs(relu5_2)
     val relu5_3 = ReLU().setName("relu5_3").inputs(conv5_3)
     val pool5 = MaxPooling(2, 2, 2, 2).setName("pool5").inputs(relu5_3)
-
-    val fc6 = Linear(512 * 7 * 7, 4096).
-      setInitMethod(Xavier, ConstInitMethod(0.1)).setName("fc6").inputs(pool5)
-    val relu6 = ReLU().setName("relu6").inputs(fc6)
-    val drop6 = if (hasDropout) {
-      Dropout(0.5).setName("drop6").inputs(relu6)
-    } else {
-      relu6
-    }
-    val fc7 = Linear(4096, 4096).
-      setInitMethod(Xavier, ConstInitMethod(0.1)).setName("fc7").inputs(drop6)
-    val relu7 = ReLU().setName("relu7").inputs(fc7)
-    val drop7 = if (hasDropout) {
-      Dropout(0.5).setName("drop7").inputs(relu7)
-    } else {
-      relu7
-    }
-    val fc8 = Linear(4096, classNum).
-      setInitMethod(Xavier, ConstInitMethod(0.1)).setName(("fc8")).inputs(drop7)
-    val output = ReorderMemory(HeapData(Array(batchSize, classNum), Memory.Format.nc)).inputs(fc8)
-
-    DnnGraph(Array(input), Array(output))
-  }
-
-  def fusionGraph(batchSize: Int, classNum: Int, hasDropout: Boolean = true): DnnGraph = {
-    val input = Input(Array(batchSize, 3, 224, 224), Memory.Format.nchw).inputs()
-    val conv1_1 = Conv(3, 64, 3, 3, 1, 1, 1, 1).setName("conv1_1").setReLU().inputs(input)
-    val conv1_2 = Conv(64, 64, 3, 3, 1, 1, 1, 1).setName("conv1_2").setReLU().inputs(conv1_1)
-    val pool1 = MaxPooling(2, 2, 2, 2).setName("pool1").inputs(conv1_2)
-
-    val conv2_1 = Conv(64, 128, 3, 3, 1, 1, 1, 1).setName("conv2_1").setReLU().inputs(pool1)
-    val conv2_2 = Conv(128, 128, 3, 3, 1, 1, 1, 1).setName("conv2_2").setReLU().inputs(conv2_1)
-    val pool2 = MaxPooling(2, 2, 2, 2).setName("pool2").inputs(conv2_2)
-
-    val conv3_1 = Conv(128, 256, 3, 3, 1, 1, 1, 1).setName("conv3_1").setReLU().inputs(pool2)
-    val conv3_2 = Conv(256, 256, 3, 3, 1, 1, 1, 1).setName("conv3_2").setReLU().inputs(conv3_1)
-    val conv3_3 = Conv(256, 256, 3, 3, 1, 1, 1, 1).setName("conv3_3").setReLU().inputs(conv3_2)
-    val pool3 = MaxPooling(2, 2, 2, 2).setName("pool3").inputs(conv3_3)
-
-    val conv4_1 = Conv(256, 512, 3, 3, 1, 1, 1, 1).setName("conv4_1").setReLU().inputs(pool3)
-    val conv4_2 = Conv(512, 512, 3, 3, 1, 1, 1, 1).setName("conv4_2").setReLU().inputs(conv4_1)
-    val conv4_3 = Conv(512, 512, 3, 3, 1, 1, 1, 1).setName("conv4_3").setReLU().inputs(conv4_2)
-    val pool4 = MaxPooling(2, 2, 2, 2).setName("pool4").inputs(conv4_3)
-
-    val conv5_1 = Conv(512, 512, 3, 3, 1, 1, 1, 1).setName("conv5_1").setReLU().inputs(pool4)
-    val conv5_2 = Conv(512, 512, 3, 3, 1, 1, 1, 1).setName("conv5_2").setReLU().inputs(conv5_1)
-    val conv5_3 = Conv(512, 512, 3, 3, 1, 1, 1, 1).setName("conv5_3").setReLU().inputs(conv5_2)
-    val pool5 = MaxPooling(2, 2, 2, 2).setName("pool5").inputs(conv5_3)
 
     val fc6 = Linear(512 * 7 * 7, 4096).
       setInitMethod(Xavier, ConstInitMethod(0.1)).setName("fc6").inputs(pool5)

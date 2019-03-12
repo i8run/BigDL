@@ -54,24 +54,77 @@ object Perf {
     opt[Boolean]('q', "quantize")
       .text("Quantize the FP32 model")
       .action((v, p) => p.copy(quantize = v))
+    opt[Boolean]('d', "debug")
+      .text("print the layer wise performance information")
+      .action((v, p) => p.copy(layerWiseInfo = v))
     checkConfig( c =>
       if (c.quantize && c.training) failure("traing mode doesn't support quantized model")
       else success
     )
   }
 
-  def main(argv: Array[String]): Unit = {
+  private def initProperties(): Unit = {
     System.setProperty("bigdl.mkldnn.fusion.convbn", "true")
     System.setProperty("bigdl.mkldnn.fusion.bnrelu", "true")
     System.setProperty("bigdl.mkldnn.fusion.convrelu", "true")
     System.setProperty("bigdl.mkldnn.fusion.convsum", "true")
+    System.setProperty("bigdl.mkldnn.fusion", "true")
+  }
 
+  private def initModel(model: Module[Float], training: Boolean): Module[Float] = {
+    Engine.dnnComputing.invokeAndWait2(Array(1).map(_ => () => {
+      if (training) {
+        model.training()
+        model match {
+          case seq: MklDnnContainer => seq.compile(TrainingPhase)
+          case graph: DnnGraph => graph.compile(TrainingPhase)
+          case _ =>
+        }
+      } else {
+        initProperties()
+        model.evaluate()
+        model match {
+          case seq: MklDnnContainer => seq.compile(InferencePhase)
+          case graph: DnnGraph => graph.compile(InferencePhase)
+          case _ =>
+        }
+      }
+    }))
+    model
+  }
+
+  private def quantize(model: Module[Float], inputShape: Array[Int]): Module[Float] = {
+    model.evaluate()
+    val inputs = new Array[Tensor[Float]](2)
+    for (i <- 0 until 2) {
+      inputs(i) = Tensor[Float](inputShape).apply1(_ => RNG.uniform(-124, 151).toInt.toFloat)
+    }
+
+    Engine.dnnComputing.invokeAndWait2(Array(1).map(_ => () => {
+      model.asInstanceOf[DnnGraph].compile(InferencePhase)
+      inputs.foreach { input =>
+        model.forward(input)
+        model.asInstanceOf[DnnGraph].generateScalesWithMask(input, 0, 2)
+      }
+    }))
+    model.release()
+
+    initProperties()
+
+    val quantModel = model.quantize()
+    Engine.dnnComputing.invokeAndWait2(Array(1).map(_ => () => {
+      quantModel.asInstanceOf[DnnGraph].compile(InferencePhase)
+    }))
+
+    quantModel
+  }
+
+  def main(argv: Array[String]): Unit = {
     System.setProperty("bigdl.localMode", "true")
     System.setProperty("bigdl.engineType", "mkldnn")
     Engine.init
 
     parser.parse(argv, new ResNet50PerfParams()).foreach { params =>
-      RNG.setSeed(1)
       val batchSize = params.batchSize
       val training = params.training
       val iterations = params.iteration
@@ -84,68 +137,20 @@ object Perf {
       val label = Tensor(batchSize).apply1(_ => Math.ceil(RNG.uniform(0, 1) * 1000).toFloat)
 
       val fp32Model = params.model match {
-        case "vgg16" => Vgg_16(batchSize, classNum)
-        case "resnet50" => ResNet(batchSize, classNum, T("depth" -> 50, "dataSet" -> ImageNet))
         case "inception_v1" => Inception_v1_NoAuxClassifier(batchSize, classNum)
-        case "vgg16_graph" =>
-          com.intel.analytics.bigdl.models.vgg.Vgg_16.fusionGraph(1000)
-        // Vgg_16.fusionGraph(batchSize, classNum, false)
-        case "resnet50_graph" =>
+        case "vgg16" => Vgg_16.graph(batchSize, classNum, true)
+        case "resnet50" =>
           ResNet.graph(batchSize, classNum, T("depth" -> 50, "dataSet" -> ImageNet))
         case _ => throw new UnsupportedOperationException(s"Unkown model ${params.model}")
-      }
-
-      if (!params.training) {
-        fp32Model.evaluate()
-      }
-
-      val inputs = new Array[Tensor[Float]](2)
-      for (i <- 0 until 2) {
-        inputs(i) = Tensor[Float](inputShape).apply1(_ => RNG.uniform(-124, 151).toInt.toFloat)
       }
 
       val criterion = CrossEntropyCriterion()
 
       // FIXME so urgly
       val model = if (!params.quantize) {
-        val model = fp32Model
-        Engine.dnnComputing.invokeAndWait2(Array(1).map(_ => () => {
-          if (training) {
-            if (model.isInstanceOf[MklDnnContainer]) {
-              model.asInstanceOf[MklDnnContainer]
-                .compile(TrainingPhase, Array(HeapData(inputShape, inputFormat)))
-            } else if (model.isInstanceOf[DnnGraph]) {
-              model.asInstanceOf[DnnGraph].compile(TrainingPhase)
-            }
-            model.training()
-          } else {
-            if (model.isInstanceOf[MklDnnContainer]) {
-              model.asInstanceOf[MklDnnContainer]
-                .compile(InferencePhase, Array(HeapData(inputShape, inputFormat)))
-            } else if (model.isInstanceOf[DnnGraph]) {
-              model.asInstanceOf[DnnGraph].compile(InferencePhase)
-            }
-            model.evaluate()
-          }
-        }))
-        model
+        initModel(fp32Model, params.training)
       } else {
-        Engine.dnnComputing.invokeAndWait2(Array(1).map(_ => () => {
-          fp32Model.asInstanceOf[Sequential].compile(InferencePhase)
-          inputs.foreach { input =>
-            fp32Model.forward(input)
-            fp32Model.asInstanceOf[Sequential].generateScalesWithMask(input, 0, 2)
-          }
-        }))
-        fp32Model.release()
-        val newModel = fp32Model.quantize()
-
-        println("=" * 80)
-
-        Engine.dnnComputing.invokeAndWait2(Array(1).map(_ => () => {
-          newModel.asInstanceOf[Sequential].compile(InferencePhase)
-        }))
-        newModel
+        quantize(fp32Model, inputShape)
       }
 
       var iteration = 0
@@ -170,7 +175,9 @@ object Perf {
         iteration += 1
       }
 
-      model.getTimes.sortBy(_._3).foreach(x => println(x._1.getClass.getSimpleName, x._2, x._3))
+      if (params.layerWiseInfo) {
+        model.getTimes.sortBy(_._3).foreach(x => println(x._1.getClass.getSimpleName, x._2, x._3))
+      }
     }
   }
 }
@@ -178,9 +185,10 @@ object Perf {
 case class ResNet50PerfParams (
   batchSize: Int = 16,
   iteration: Int = 10,
-  training: Boolean = false,
-  quantize: Boolean = true,
-  model: String = "resnet50"
+  training: Boolean = true,
+  quantize: Boolean = false,
+  model: String = "resnet50",
+  layerWiseInfo: Boolean = false
 )
 
 object ResNet {

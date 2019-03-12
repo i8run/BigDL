@@ -17,8 +17,6 @@ package com.intel.analytics.bigdl.nn.mkldnn
 
 import com.intel.analytics.bigdl.mkl._
 
-import scala.collection.mutable.ArrayBuffer
-
 sealed trait MemoryData extends Serializable {
   def shape: Array[Int]
   def layout: Int

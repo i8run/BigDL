@@ -99,15 +99,6 @@ private[mkldnn] object Fusion {
     } else node
   }
 
-  private def shareSameOutputConvs(node: Node[AbstractModule[Activity, Activity, Float]]): Unit = {
-    val prev = findPrevious(node)
-    if (prev.element.isInstanceOf[SpatialConvolution] ||
-    prev.element.isInstanceOf[ReLU]) {
-      prev.element.asInstanceOf[SpatialConvolution].scalesOfOutput.set(
-        node.element.asInstanceOf[SpatialConvolution].scalesOfOutput.scales.toArray)
-    }
-  }
-
   /**
    * If previous layers number of CAddTable is two, and one of it is conv layer.
    * then fuse output of the other layer in conv layer.

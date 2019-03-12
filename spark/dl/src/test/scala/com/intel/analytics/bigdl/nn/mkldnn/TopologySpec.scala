@@ -1000,31 +1000,6 @@ class TopologySpec extends FlatSpec with Matchers {
     quant.forward(input)
 
     System.clearProperty("bigdl.mkldnn.fusion")
-
-
-    println("")
-  }
-
-  "resnet50 load model" should "set the same scales" in {
-    val model = Module.load[Float]("/tmp/model.472.quantized")
-    val quant = model.quantize()
-
-    val input = Tensor[Float](128, 3, 224, 224).rand(-0.9609375, 1.1796875)
-
-//    val model.ge
-//    System.setProperty("bigdl.mkldnn.fusion", "true")
-//    quant.asInstanceOf[DnnGraph].compile(InferencePhase)
-//    quant.forward(input)
-
-    System.setProperty("bigdl.mkldnn.fusion", "true")
-    quant.asInstanceOf[DnnGraph].compile(InferencePhase)
-    model.asInstanceOf[DnnGraph].compile(InferencePhase)
-    System.clearProperty("bigdl.mkldnn.fusion")
-
-    quant.forward(input)
-    model.forward(input)
-
-    println("")
   }
 
   "resnet50 model" should "work correctly" in {
@@ -1054,8 +1029,8 @@ class TopologySpec extends FlatSpec with Matchers {
 
     val softmax = SoftMax()
 
-    println(softmax.forward(fusion.output).toTensor.max(2))
-    println(softmax.forward(quant.output).toTensor.max(2))
+    softmax.forward(fusion.output).toTensor.max(2) should be (
+      softmax.forward(quant.output).toTensor.max(2))
 
     System.clearProperty("bigdl.mkldnn.fusion")
   }

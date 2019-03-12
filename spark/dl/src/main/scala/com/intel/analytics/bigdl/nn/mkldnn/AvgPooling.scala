@@ -20,8 +20,6 @@ import com.intel.analytics.bigdl.nn.Utils
 import com.intel.analytics.bigdl.nn.abstractnn.Activity
 import com.intel.analytics.bigdl.tensor.Tensor
 
-import scala.collection.mutable.ArrayBuffer
-
 class AvgPooling(
   kW: Int,
   kH: Int,

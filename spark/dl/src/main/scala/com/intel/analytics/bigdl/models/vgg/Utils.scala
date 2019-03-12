@@ -42,7 +42,7 @@ object Utils {
     modelSnapshot: Option[String] = None,
     stateSnapshot: Option[String] = None,
     summaryPath: Option[String] = None,
-    batchSize: Int = 16,
+    batchSize: Int = 112,
     maxEpoch: Int = 90,
     overWriteCheckpoint: Boolean = false,
     learningRate: Double = 0.01,

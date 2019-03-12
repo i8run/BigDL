@@ -34,14 +34,23 @@ class LRN(
   @transient private var fwdMemPrims: Array[Long] = _
   @transient private var bwdMemPrims: Array[Long] = _
 
+  var isOnlyForInference = false
+
   override private[mkldnn] def initFwdPrimitives(inputs: Array[MemoryData], phase: Phase) = {
     _inputFormats = Array(NativeData(inputs(0).shape, inputs(0).layout, DataType.F32))
 
+    val kind = if (!isTraining()) PropKind.ForwardScoring else PropKind.ForwardTraining
+    if (!isTraining()) {
+      isOnlyForInference = true
+    } else {
+      isOnlyForInference = false
+    }
+
     val description = MklDnn.LRNForwardDescInit(
-      PropKind.ForwardScoring, AlgKind.LrnAcrossChannels,
+      kind, AlgKind.LrnAcrossChannels,
       _inputFormats(0).getMemoryDescription(), size, alpha.toFloat, beta.toFloat, k.toFloat)
     fwdPrimDesc = MklDnn.PrimitiveDescCreate(description, runtime.engine, 0L)
-    if (inputFormats()(0).mask != -1) {
+    if (inputFormats()(0).scales.nonEmpty) {
       val mask = inputFormats()(0).mask
       val scales = inputFormats()(0).scales
       _outputFormats = Array(MemoryData.primitiveOutput(fwdPrimDesc))
@@ -51,7 +60,6 @@ class LRN(
       _outputFormats = Array(MemoryData.primitiveOutput(fwdPrimDesc))
     }
 
-    println(s"${getName()}")
     val outputs = if (phase == TrainingPhase) {
       workSpaceFormat = MemoryData.operationWant(fwdPrimDesc, Query.WorkspacePd)
       workSpace = initTensor(workSpaceFormat).asInstanceOf[Tensor[Float]]
@@ -94,8 +102,12 @@ class LRN(
   }
 
   override def updateOutput(input: Activity): Activity = {
-    // todo add back workspace
-    val buffer = Array(input.asInstanceOf[Tensor[Float]], output.asInstanceOf[Tensor[Float]])
+    val buffer = if (isOnlyForInference) {
+      Array(input.asInstanceOf[Tensor[Float]], output.asInstanceOf[Tensor[Float]],
+        workSpace)
+    } else {
+      Array(input.asInstanceOf[Tensor[Float]], output.asInstanceOf[Tensor[Float]])
+    }
     MklDnnOps.streamSubmit(runtime.stream, 1, updateOutputPrimitives, 1, fwdMemPrims,
       buffer.asInstanceOf[Array[Tensor[_]]])
     output

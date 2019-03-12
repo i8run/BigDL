@@ -115,9 +115,6 @@ class MaxPooling(
         Array(_outputFormats(0)).map(_.getPrimitive(runtime)), 1))
       fwdMemPrims = Array(_inputFormats(0), _outputFormats(0)).map(_.getPrimitive(runtime))
     }
-
-    println(s"${getName()}, ${_inputFormats(0)}")
-    println(s"${getName()}, ${_outputFormats(0)}")
     (_inputFormats, _outputFormats)
   }
 

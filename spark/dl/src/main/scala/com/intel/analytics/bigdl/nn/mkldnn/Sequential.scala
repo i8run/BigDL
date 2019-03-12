@@ -27,10 +27,21 @@ import scala.collection.mutable.ArrayBuffer
 
 class Sequential extends MklDnnContainer {
 
-  val fuseConvBn = System.getProperty("bigdl.mkldnn.fusion.convbn", "false").toBoolean
-  val fuseBnRelu = System.getProperty("bigdl.mkldnn.fusion.bnrelu", "false").toBoolean
-  val fuseConvRelu = System.getProperty("bigdl.mkldnn.fusion.convrelu", "false").toBoolean
-  val fuseConvSum = System.getProperty("bigdl.mkldnn.fusion.convsum", "false").toBoolean
+  def fuseConvBn: Boolean = {
+    System.getProperty("bigdl.mkldnn.fusion.convbn", "false").toBoolean
+  }
+
+  def fuseBnRelu: Boolean = {
+    System.getProperty("bigdl.mkldnn.fusion.bnrelu", "false").toBoolean
+  }
+
+  def fuseConvRelu: Boolean = {
+    System.getProperty("bigdl.mkldnn.fusion.convrelu", "false").toBoolean
+  }
+
+  def fuseConvSum: Boolean = {
+    System.getProperty("bigdl.mkldnn.fusion.convsum", "false").toBoolean
+  }
 
   override def add(module: AbstractModule[_ <: Activity, _ <: Activity, Float]): this.type = {
     require(mklDnnModules == null, "You should not call add after compilation")
@@ -176,8 +187,7 @@ class Sequential extends MklDnnContainer {
 
   type ArrayBufferModules[Float] = ArrayBuffer[AbstractModule[Activity, Activity, Float]]
   private def convWithBn(modules: Array[MklDnnModule], phase: Phase): Array[MklDnnModule] = {
-    if (System.getProperty("bigdl.mkldnn.fusion.convbn", "false").toBoolean &&
-      phase == InferencePhase) {
+    if (fuseConvBn && phase == InferencePhase) {
       val newModules: ArrayBuffer[MklDnnModule] = ArrayBuffer.empty
       var lastBn: SpatialBatchNormalization = null
 
@@ -199,7 +209,7 @@ class Sequential extends MklDnnContainer {
   }
 
   private def convWithReLU(modules: Array[MklDnnModule], phase: Phase): Array[MklDnnModule] = {
-    if (System.getProperty("bigdl.mkldnn.fusion.convrelu", "false").toBoolean) {
+    if (fuseConvRelu) {
       val newModules: ArrayBuffer[MklDnnModule] = ArrayBuffer.empty
       var lastReLU: ReLU = null
 
@@ -226,7 +236,7 @@ class Sequential extends MklDnnContainer {
   }
 
   private def bnWithReLU(modules: Array[MklDnnModule], phase: Phase): Array[MklDnnModule] = {
-    if (System.getProperty("bigdl.mkldnn.fusion.bnrelu", "false").toBoolean) {
+    if (fuseBnRelu) {
       val newModules: ArrayBuffer[MklDnnModule] = ArrayBuffer.empty
       var lastReLU: ReLU = null
 
@@ -249,8 +259,7 @@ class Sequential extends MklDnnContainer {
 
   private def convWithSum(modules: Array[MklDnnModule], phase: Phase): Array[MklDnnModule] = {
     val newModules: ArrayBuffer[MklDnnModule] = ArrayBuffer.empty
-    if (!System.getProperty("bigdl.mkldnn.fusion.convsum", "false").toBoolean ||
-      modules.length <= 2 || phase == TrainingPhase) {
+    if (!fuseConvSum || modules.length <= 2 || phase == TrainingPhase) {
       newModules.appendAll(modules)
     } else {
       var lastConv: SpatialConvolution = null
