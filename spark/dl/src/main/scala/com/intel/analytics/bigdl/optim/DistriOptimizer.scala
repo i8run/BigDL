@@ -180,7 +180,7 @@ object DistriOptimizer extends AbstractOptimizer {
     }
 
     logger.info(s"config $state")
-    var recordsProcessedThisEpoch = optimMethods.values.head.state[Int]("recordsProcessedThisEpoch")
+    recordsProcessedThisEpoch = optimMethods.values.head.state[Int]("recordsProcessedThisEpoch")
     if (recordsProcessedThisEpoch == 0) {
       val shuffleBefore = System.nanoTime()
       logger.info("Shuffle data")
@@ -1081,5 +1081,8 @@ class DistriOptimizer[T: ClassTag](
       iter
     }.count()
     CachedModels.deleteKey(modelBroadcast.uuid)
+  }
+
+  private def train(): Unit = {
   }
 }
