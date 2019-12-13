@@ -132,6 +132,16 @@ class ReLUSpec extends FlatSpec {
     assert(output == input)
     assert(gradInput == gradOutput)
   }
+
+  "load mobilenet v2" should "work correctly" in {
+    System.setProperty("bigdl.engineType", "mkldnn")
+    val model = Module.loadModule[Float]("/home/yanzhang/downloads/1575944148311.obj")
+    val ir = model.toGraph().asInstanceOf[StaticGraph[Float]].toIRgraph().cloneModule()
+    val input = Tensor[Float](Array(2, 3, 224, 224)).rand(-1, 1)
+    ir.forward(input)
+    println("")
+    System.clearProperty("bigdl.engineType")
+  }
 }
 
 class ReLUSerialTest extends ModuleSerializationTest {
