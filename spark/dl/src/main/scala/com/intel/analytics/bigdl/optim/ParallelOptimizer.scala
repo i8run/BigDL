@@ -704,10 +704,6 @@ class ParallelOptimizer[T: ClassTag](
 
     optimMethods = collection.immutable.Map(parallelOptimMethods.toSeq: _*)
 
-    state("dropPercentage") = dropPercentage
-    state("warmupIterationNum") = warmupIterationNum
-    state("computeThresholdbatchSize") = computeThresholdbatchSize
-    state("maxDropPercentage") = maxDropPercentage
     state("isLayerwiseScaled") = Utils.isLayerwiseScaled(_model)
 
     val nodeNumber = Engine.nodeNumber()

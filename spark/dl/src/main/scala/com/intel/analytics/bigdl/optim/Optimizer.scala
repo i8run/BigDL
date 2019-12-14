@@ -66,12 +66,6 @@ abstract class Optimizer[T: ClassTag, D](
   protected var trainSummary: Option[TrainSummary] = None
   protected var validationSummary: Option[ValidationSummary] = None
 
-  // To achieve better performance, please set dropPercentage as 0.04
-  protected var dropPercentage: Double = 0.0
-  protected var maxDropPercentage: Double = 0.0
-  protected var computeThresholdbatchSize: Int = 100
-  protected var warmupIterationNum: Int = 200
-
   /**
    * a list of ParameterProcessor, orders matter
    */
@@ -388,26 +382,6 @@ abstract class Optimizer[T: ClassTag, D](
    */
   def setEndWhen(endWhen: Trigger): this.type = {
     this.endWhen = endWhen
-    this
-  }
-
-  /**
-   * Set dropping a certain percentage (`dropPercentage`) of models during distributed
-   * training to accelerate, because some cached model may take too long.
-   *
-   * @param dropPercentage drop percentage
-   * @param maxDropPercentage max drop percentage
-   * @param batchsize batch size
-   * @param warmupIteration how may iteration to warm up
-   * @return this optimizer
-   */
-  def setDropModuleProperty(dropPercentage: Double, maxDropPercentage: Double,
-    batchsize: Int = 100, warmupIteration: Int = 200): this.type = {
-    this.dropPercentage = dropPercentage
-    this.maxDropPercentage = maxDropPercentage
-    require(dropPercentage >= 0 && dropPercentage <= maxDropPercentage)
-    this.computeThresholdbatchSize = batchsize
-    this.warmupIterationNum = warmupIteration
     this
   }
 

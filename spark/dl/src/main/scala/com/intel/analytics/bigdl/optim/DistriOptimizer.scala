@@ -200,10 +200,6 @@ object DistriOptimizer extends AbstractOptimizer {
     var tasks: ArrayBuffer[Future[_]] = new ArrayBuffer()
     var threshold = Long.MaxValue
     var timeout = Long.MaxValue
-    val dropPercentage = state.get[Double]("dropPercentage").get
-    val warmupIterationNum = state.get[Int]("warmupIterationNum").get
-    val computeThresholdbatchSize = state.get[Int]("computeThresholdbatchSize").get
-    val maxDropPercentage = state.get[Double]("maxDropPercentage").get
     val driverSubModelNum = partitionNum * _subModelNumber
     var dropModelNumBatch = 0
     var lossArray = new Array[Double](_subModelNumber)
@@ -278,10 +274,6 @@ object DistriOptimizer extends AbstractOptimizer {
     var tasks: ArrayBuffer[Future[_]] = new ArrayBuffer()
     var threshold = Long.MaxValue
     var timeout = Long.MaxValue
-    val dropPercentage = state.get[Double]("dropPercentage").get
-    val warmupIterationNum = state.get[Int]("warmupIterationNum").get
-    val computeThresholdbatchSize = state.get[Int]("computeThresholdbatchSize").get
-    val maxDropPercentage = state.get[Double]("maxDropPercentage").get
     val driverSubModelNum = partitionNum * _subModelNumber
     var dropModelNumBatch = 0
     var lossArray = new Array[Double](_subModelNumber)
@@ -307,7 +299,7 @@ object DistriOptimizer extends AbstractOptimizer {
       number of model updates that finished before the thread timeout mechanism.
      */
     val numFinishedModelUpdates: Int = dataRDD
-      .zipPartitions(models, preservesPartitioning = true) { (data, modelIter) => {
+      .zipPartitions(models, preservesPartitioning = true) { (data, modelIter) =>
         val cached = modelIter.next()
         val syWStart = System.nanoTime()
         /*
@@ -324,159 +316,50 @@ object DistriOptimizer extends AbstractOptimizer {
         recordsNum += records
 
         Iterator.single(finishedThreads)
-      }
       }.reduce(_ + _)
 
-    dropModelNumBatch += (driverSubModelNum - numFinishedModelUpdates)
-    if (dropPercentage == 0.0 ||
-      numFinishedModelUpdates >= driverSubModelNum * (1.0 - maxDropPercentage)) {
-      // enough records were processed for this batch, so update the model
-      val value = lossSum.value / numFinishedModelUpdates
+    // enough records were processed for this batch, so update the model
+    val value = lossSum.value / numFinishedModelUpdates
 
-      driverState("numFinishedModel") = numFinishedModelUpdates
-      // isGradientUpdated is flag to mark whether gradient is updated. May changed in the future.
-      driverState("isGradientUpdated") = false
-      // parameterProcesser like L2NormClippingProcessor may aggregate gradient,
-      // and change the value of isGradientUpdated in driverState.
-      parameterProcessers.foreach(_.collectGlobalData(models, parameters, metrics, driverState))
+    driverState("numFinishedModel") = numFinishedModelUpdates
+    // isGradientUpdated is flag to mark whether gradient is updated. May changed in the future.
+    driverState("isGradientUpdated") = false
+    // parameterProcesser like L2NormClippingProcessor may aggregate gradient,
+    // and change the value of isGradientUpdated in driverState.
+    parameterProcessers.foreach(_.collectGlobalData(models, parameters, metrics, driverState))
 
-      val isGradientUpdated = driverState[Boolean]("isGradientUpdated")
-      val stateBroadcast = sc.broadcast(driverState)
+    val isGradientUpdated = driverState[Boolean]("isGradientUpdated")
 
-      models.mapPartitions { modelIter =>
-        val (paramLocalStart, paramLocalLen) = parameters.localPartitionRange
-        val modelCache = modelIter.next()
-        // if parameterProcesser has aggregated gradient, we can skip this aggregation.
-        if (!isGradientUpdated) {
-          val getG = System.nanoTime()
-          parameters.aggregateGradientPartition(numFinishedModelUpdates)
-          driverMetrics.add("aggregrateGradientParition average executor",
-            System.nanoTime() - getG)
-        }
-        parameterProcessers.foreach(_.processParameters(parameters, modelCache, driverState))
+    models.mapPartitions { modelIter =>
+      executorParameterProcess(parameters, modelIter.next(), isGradientUpdated, driverMetrics,
+        numFinishedModelUpdates, parameterProcessers, driverState, validationMethods,
+        parameterSplits, value)
+      Iterator.empty
+    }.count()
 
-        modelCache.optimMethods.foreach { case (name, optimMethod) =>
+    recordsProcessedThisEpoch += recordsNum.value
+    val end = System.nanoTime()
+    wallClockTime += end - start
+    driverState("isGradientUpdated") = true
+    driverState("Loss") = lossSum.value.toFloat / numFinishedModelUpdates
 
-          optimMethod.state.update("epoch", driverState[Int]("epoch"))
-          optimMethod.state.update("neval", driverState[Int]("neval"))
-          optimMethod.state.update("Loss", driverState[Float]("Loss"))
-          if (validationMethods.isDefined) {
-            optimMethod.state.update("score", driverState[Float]("score"))
-          }
-          val p = parameterSplits(name)
-          val startIdx = Math.max(paramLocalStart, p._1)
-          val endIdx = Math.min(paramLocalStart + paramLocalLen, p._1 + p._2)
-          if (endIdx > startIdx) {
+    val results = driverOptimMethodsUpdates(optimMethods, driverState, recordsNum.value,
+      end - start,
+      wallClockTime, lastEpochTime, numSamples, metrics, validationMethods)
 
-            optimMethod.optimize(_ => (ev.fromType(value), parameters.gradientPartition.narrow(1,
-              startIdx - paramLocalStart + 1, endIdx - startIdx)),
-              parameters.weightPartition.narrow(1,
-                startIdx - paramLocalStart + 1, endIdx - startIdx))
-          }
+    wallClockTime = results._1
+    lastEpochTime = results._2
 
-        }
-        var time = System.nanoTime()
-        driverMetrics.add("compute weight average", System.nanoTime() - time)
-        parameters.sendWeightPartition()
-        time = System.nanoTime()
-        driverMetrics.add("send weights average", System.nanoTime() - time)
-        Iterator.empty
-      }.count()
-
-      stateBroadcast.destroy()
-      recordsProcessedThisEpoch += recordsNum.value
-      val end = System.nanoTime()
-      wallClockTime += end - start
-      driverState("isGradientUpdated") = true
-      driverState("Loss") = lossSum.value.toFloat / numFinishedModelUpdates
-      optimMethods.foreach { v =>
-        v._2.updateHyperParameter()
-      }
-      // TODO: Support show learningrate for multiOptimMethod
-      driverState(s"LearningRate") = optimMethods.head._2.getLearningRate().toFloat
-
-      driverState("Throughput") = recordsNum.value.toFloat / ((end - start) / 1e9f)
-      val _header = header(driverState[Int]("epoch"), recordsProcessedThisEpoch, numSamples,
-        driverState[Int]("neval"), wallClockTime)
-      logger.info(s"${_header} Trained ${recordsNum.value} records in ${(end - start) / 1e9} " +
-        s"seconds. Throughput is ${driverState("Throughput")} records/second. Loss is ${
-          driverState("Loss")
-        }. ${getHyperParameterLog(optimMethods)}")
-      logger.debug("\n" + metrics.summary())
-      logger.debug("Dropped modules: " + (driverSubModelNum - numFinishedModelUpdates))
-      lossArray = new Array[Double](_subModelNumber)
-
-      // compute threshold
-      iteration += 1
-      if (dropPercentage > 0.0 && iteration > warmupIterationNum &&
-        iteration % computeThresholdbatchSize == 0) {
-        val moduleTimeList = models.mapPartitions { iter =>
-          iter.next().moduleTimeList.iterator
-        }.collect()
-
-        val k = (dropPercentage * computeThresholdbatchSize * driverSubModelNum).toInt
-        if (k > dropModelNumBatch) {
-          threshold = Util.kthLargest(moduleTimeList, 0, moduleTimeList.length - 1,
-            k - dropModelNumBatch)
-        } else {
-          threshold = (threshold * 1.01).toLong
-        }
-        logger.info("threshold: " + threshold)
-
-        // clear moduleTimeList in each node
-        models.mapPartitions { iter =>
-          val timeList = iter.next.moduleTimeList
-          var i = 0
-          while (i < timeList.length) {
-            timeList(i) = 0
-            i += 1
-          }
-          Iterator.empty
-        }.count()
-        dropModelNumBatch = 0
-      }
-
-      driverState("neval") = driverState[Int]("neval") + 1
-
-      if (recordsProcessedThisEpoch >= numSamples) {
-        // Epoch is finished
-        val epochEnd = System.nanoTime()
-        wallClockTime = lastEpochTime + epochEnd - epochStart
-        lastEpochTime = wallClockTime
-        epochStart = System.nanoTime()
-        logger.info(s"${_header} Epoch finished. Wall clock time is ${wallClockTime / 1e6} ms")
-
-        driverState("epoch") = driverState[Int]("epoch") + 1
-        recordsProcessedThisEpoch = 0
-      }
-
-      optimMethods.map { case (moduleName, optimMethod) =>
-        optimMethod.state.update("recordsProcessedThisEpoch", recordsProcessedThisEpoch)
-        optimMethod.state.update("epoch", driverState[Int]("epoch"))
-        optimMethod.state.update("neval", driverState[Int]("neval"))
-        optimMethod.state.update("Loss", driverState[Float]("Loss"))
-        if (validationMethods.isDefined) {
-          optimMethod.state.update("score", driverState[Float]("score"))
-        }
-      }
-
-
-      trainSummary.foreach { summary =>
-        saveSummary(
-          summary,
-          models,
-          driverState,
-          parameters,
-          trainingModel
-        )
-      }
-
-    } else {
-      logger.info(s"Warning! Not enough training samples were successfully processed in this " +
-        s"iteration due to some slow tasks. The gradients computed in this iteration will be " +
-        s"discarded. Only $numFinishedModelUpdates/$driverSubModelNum threads successfully " +
-        s"completed training.")
+    trainSummary.foreach { summary =>
+      saveSummary(
+        summary,
+        models,
+        driverState,
+        parameters,
+        trainingModel
+      )
     }
+
   }
 
   /**
@@ -535,7 +418,6 @@ object DistriOptimizer extends AbstractOptimizer {
         s" is not equal to configured node number ${nodeNumber}")
 
 
-    val computeThresholdbatchSize = state.get[Int]("computeThresholdbatchSize").get
     val nExecutor = Engine.nodeNumber()
     val executorCores = Engine.coreNumber()
 
@@ -590,7 +472,7 @@ object DistriOptimizer extends AbstractOptimizer {
         cached.map(_._3), // gradients
         cached.map(_._4), // criterions
         cached.map(_._5), // states
-        new Array[Long](_subModelNumber * computeThresholdbatchSize),
+        new Array[Long](_subModelNumber),
         cached.map(_._6),
         broadcastOptim.map(v => (v._1, v._2.clone()))
       ))
@@ -795,6 +677,103 @@ object DistriOptimizer extends AbstractOptimizer {
     // TODO delete the last of tuple, use value in Context
     (finishedThreads.size, lossSum, finishedThreads.size * stackSize)
   }
+
+  private def executorParameterProcess[T: ClassTag](parameters: AllReduceParameter[T],
+    model: Cache[T], isGradientUpdated: Boolean, driverMetrics: Metrics,
+    numFinishedModelUpdates: Int, parameterProcessers: Array[ParameterProcessor],
+    driverState: Table, validationMethods: Option[Array[ValidationMethod[T]]],
+    parameterSplits: Map[String, (Int, Int)], averageLoss: Double
+  )(implicit ev: TensorNumeric[T]): Unit = {
+    val (paramLocalStart, paramLocalLen) = parameters.localPartitionRange
+    val modelCache = model
+    // if parameterProcesser has aggregated gradient, we can skip this aggregation.
+    if (!isGradientUpdated) {
+      val getG = System.nanoTime()
+      parameters.aggregateGradientPartition(numFinishedModelUpdates)
+      driverMetrics.add("aggregrateGradientParition average executor",
+        System.nanoTime() - getG)
+    }
+    parameterProcessers.foreach(_.processParameters(parameters, modelCache, driverState))
+
+    modelCache.optimMethods.foreach { case (name, optimMethod) =>
+
+      optimMethod.state.update("epoch", driverState[Int]("epoch"))
+      optimMethod.state.update("neval", driverState[Int]("neval"))
+      optimMethod.state.update("Loss", driverState[Float]("Loss"))
+      if (validationMethods.isDefined) {
+        optimMethod.state.update("score", driverState[Float]("score"))
+      }
+      val p = parameterSplits(name)
+      val startIdx = Math.max(paramLocalStart, p._1)
+      val endIdx = Math.min(paramLocalStart + paramLocalLen, p._1 + p._2)
+      if (endIdx > startIdx) {
+
+        optimMethod.optimize(_ => (ev.fromType(averageLoss), parameters.gradientPartition.narrow(1,
+          startIdx - paramLocalStart + 1, endIdx - startIdx)),
+          parameters.weightPartition.narrow(1,
+            startIdx - paramLocalStart + 1, endIdx - startIdx))
+      }
+    }
+    var time = System.nanoTime()
+    driverMetrics.add("compute weight average", System.nanoTime() - time)
+    parameters.sendWeightPartition()
+    time = System.nanoTime()
+    driverMetrics.add("send weights average", System.nanoTime() - time)
+
+  }
+
+  private def driverOptimMethodsUpdates[T: ClassTag](
+    optimMethods: Map[String, OptimMethod[T]], driverState: Table, recordsNum: Double,
+    trainingWallTime: Long, wallClockTime: Long, lastEpochTime: Long,
+    numSamples: Int, metrics: Metrics,
+    validationMethods: Option[Array[ValidationMethod[T]]])(
+    implicit ev: TensorNumeric[T]): (Long, Long) = {
+
+    optimMethods.foreach { v =>
+      v._2.updateHyperParameter()
+    }
+    // TODO: Support show learningrate for multiOptimMethod
+    driverState(s"LearningRate") = optimMethods.head._2.getLearningRate().toFloat
+
+    driverState("Throughput") = recordsNum.toFloat / (trainingWallTime / 1e9f)
+    val _header = header(driverState[Int]("epoch"), recordsProcessedThisEpoch, numSamples,
+      driverState[Int]("neval"), wallClockTime)
+    logger.info(s"${_header} Trained $recordsNum records in ${trainingWallTime / 1e9} " +
+      s"seconds. Throughput is ${driverState("Throughput")} records/second. Loss is ${
+        driverState("Loss")
+      }. ${getHyperParameterLog(optimMethods)}")
+    logger.debug("\n" + metrics.summary())
+
+    // compute threshold
+    iteration += 1
+    driverState("neval") = driverState[Int]("neval") + 1
+
+    if (recordsProcessedThisEpoch >= numSamples) {
+      // Epoch is finished
+      val epochEnd = System.nanoTime()
+      epochStart = System.nanoTime()
+      logger.info(s"${_header} Epoch finished. Wall clock time is ${wallClockTime / 1e6} ms")
+
+      driverState("epoch") = driverState[Int]("epoch") + 1
+      recordsProcessedThisEpoch = 0
+    }
+
+    optimMethods.map { case (moduleName, optimMethod) =>
+      optimMethod.state.update("recordsProcessedThisEpoch", recordsProcessedThisEpoch)
+      optimMethod.state.update("epoch", driverState[Int]("epoch"))
+      optimMethod.state.update("neval", driverState[Int]("neval"))
+      optimMethod.state.update("Loss", driverState[Float]("Loss"))
+      if (validationMethods.isDefined) {
+        optimMethod.state.update("score", driverState[Float]("score"))
+      }
+    }
+
+    if (recordsProcessedThisEpoch >= numSamples) {
+      (lastEpochTime + epochEnd - epochStart, wallClockTime)
+    } else {
+      (wallClockTime, lastEpochTime)
+    }
+  }
 }
 
 /**
@@ -916,10 +895,6 @@ class DistriOptimizer[T: ClassTag](
       optimMethods.head._2.loadFromTable(state)
     }
 
-    state("dropPercentage") = dropPercentage
-    state("warmupIterationNum") = warmupIterationNum
-    state("computeThresholdbatchSize") = computeThresholdbatchSize
-    state("maxDropPercentage") = maxDropPercentage
     state("isLayerwiseScaled") = Utils.isLayerwiseScaled(_model)
 
     val nodeNumber = Engine.nodeNumber()
