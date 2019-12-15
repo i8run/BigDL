@@ -94,12 +94,39 @@ object DistriOptimizer extends AbstractOptimizer {
     parameterSynchronizer: DistriParameterSynchronizer[T] = null
   )
 
-  case class Context[T: ClassTag](parameter: AllReduceParameter[T], subModelNumber: Int) {
+  class Context[T: ClassTag](
+    val parameter: AllReduceParameter[T],
+    val subModelNumber: Int) extends Serializable {
+
     private var _recordsNumber: Long = 0
+    private var _epochStart: Long = 0
+    private var _iteration: Long = 0
+    private var _recordsProcessedThisEpoch: Int = 0
+    private var _epochEnd: Long = 0
 
     def addRecords(number: Long): Long = _recordsNumber + number
 
     def recordsNumber: Long = _recordsNumber
+
+    def resetRecordsNumber(): Unit = _recordsNumber = 0
+
+    def setEpochStart(currentTime: Long): Unit = _epochStart = currentTime
+
+    def epochStart: Long = _epochStart
+
+    def incIteration(): Unit = { _iteration += 1 }
+
+    def iteration: Long = _iteration
+
+    def setEpochEnd(currentTime: Long): Unit = _epochEnd = currentTime
+
+    def epochEnd: Long = _epochEnd
+
+    def addRecordsProcessedThisEpoch(records: Int): Unit = _recordsProcessedThisEpoch += records
+
+    def recordsProcessedThisEpoch: Int = _recordsProcessedThisEpoch
+
+    def resetRecordsProcessedThisEpoch(): Unit = _recordsProcessedThisEpoch = 0
   }
 
   /**
@@ -167,6 +194,9 @@ object DistriOptimizer extends AbstractOptimizer {
       case MklBlas => coresPerNode
       case MklDnn => 1
     }
+
+    val context = new Context(parameters, _subModelNumber)
+
     val driverState = T(
       "epoch" -> optimMethods.values.head.state("epoch"),
       "neval" -> optimMethods.values.head.state("neval"),
@@ -188,8 +218,9 @@ object DistriOptimizer extends AbstractOptimizer {
     }
 
     logger.info(s"config $state")
-    recordsProcessedThisEpoch = optimMethods.values.head.state[Int]("recordsProcessedThisEpoch")
-    if (recordsProcessedThisEpoch == 0) {
+    context.addRecordsProcessedThisEpoch(
+      optimMethods.values.head.state[Int]("recordsProcessedThisEpoch"))
+    if (context.recordsProcessedThisEpoch == 0) {
       val shuffleBefore = System.nanoTime()
       logger.info("Shuffle data")
       dataset.shuffle()
@@ -207,19 +238,18 @@ object DistriOptimizer extends AbstractOptimizer {
     var epochStart = System.nanoTime()
     var dataRDD = dataset.data(train = true)
 
-    val context = Context(parameters, _subModelNumber)
 
     while (!endWhen(driverState)) {
       iteration(trainingModel, metrics, models, parameters, _subModelNumber, state,
         driverState, parameterProcessers, trainSummary, optimMethods,
         validationMethods, parameterSplits, numSamples, partitionNum, sc, dataRDD, context)
 
-      if (recordsProcessedThisEpoch >= numSamples) {
+      if (context.recordsProcessedThisEpoch >= numSamples) {
         dataset.shuffle()
         dataRDD = dataset.data(train = true)
       }
 
-      val _header = header(driverState[Int]("epoch"), recordsProcessedThisEpoch, numSamples,
+      val _header = header(driverState[Int]("epoch"), context.recordsProcessedThisEpoch, numSamples,
         driverState[Int]("neval"), wallClockTime)
 
       validate(
@@ -248,10 +278,6 @@ object DistriOptimizer extends AbstractOptimizer {
     }
   }
 
-  private var recordsProcessedThisEpoch: Int = 0
-  private var epochStart: Long = 0
-  private var epochEnd: Long = 0
-  private var iteration: Int = 0
   def iteration[T: ClassTag](
     trainingModel: Module[T],
     metrics: Metrics,
@@ -310,7 +336,8 @@ object DistriOptimizer extends AbstractOptimizer {
           parameters.paramOffset, parameters.size))
         weightsResults.waitResult()
 
-        val (finishedThreads, loss, records) = train(cached, _subModelNumber, data, driverMetrics, context)
+        val (finishedThreads, loss, records) = train(cached, _subModelNumber, data, driverMetrics,
+          context)
 
         lossSum += loss
         recordsNum += records
@@ -337,7 +364,7 @@ object DistriOptimizer extends AbstractOptimizer {
       Iterator.empty
     }.count()
 
-    recordsProcessedThisEpoch += recordsNum.value
+    context.addRecordsProcessedThisEpoch(recordsNum.value)
     val end = System.nanoTime()
     wallClockTime += end - start
     driverState("isGradientUpdated") = true
@@ -345,7 +372,7 @@ object DistriOptimizer extends AbstractOptimizer {
 
     val results = driverOptimMethodsUpdates(optimMethods, driverState, recordsNum.value,
       end - start,
-      wallClockTime, lastEpochTime, numSamples, metrics, validationMethods)
+      wallClockTime, lastEpochTime, numSamples, metrics, validationMethods, context)
 
     wallClockTime = results._1
     lastEpochTime = results._2
@@ -726,7 +753,7 @@ object DistriOptimizer extends AbstractOptimizer {
     optimMethods: Map[String, OptimMethod[T]], driverState: Table, recordsNum: Double,
     trainingWallTime: Long, wallClockTime: Long, lastEpochTime: Long,
     numSamples: Int, metrics: Metrics,
-    validationMethods: Option[Array[ValidationMethod[T]]])(
+    validationMethods: Option[Array[ValidationMethod[T]]], context: Context[T])(
     implicit ev: TensorNumeric[T]): (Long, Long) = {
 
     optimMethods.foreach { v =>
@@ -736,7 +763,7 @@ object DistriOptimizer extends AbstractOptimizer {
     driverState(s"LearningRate") = optimMethods.head._2.getLearningRate().toFloat
 
     driverState("Throughput") = recordsNum.toFloat / (trainingWallTime / 1e9f)
-    val _header = header(driverState[Int]("epoch"), recordsProcessedThisEpoch, numSamples,
+    val _header = header(driverState[Int]("epoch"), context.recordsProcessedThisEpoch, numSamples,
       driverState[Int]("neval"), wallClockTime)
     logger.info(s"${_header} Trained $recordsNum records in ${trainingWallTime / 1e9} " +
       s"seconds. Throughput is ${driverState("Throughput")} records/second. Loss is ${
@@ -745,21 +772,21 @@ object DistriOptimizer extends AbstractOptimizer {
     logger.debug("\n" + metrics.summary())
 
     // compute threshold
-    iteration += 1
+    context.incIteration()
     driverState("neval") = driverState[Int]("neval") + 1
 
-    if (recordsProcessedThisEpoch >= numSamples) {
+    if (context.recordsProcessedThisEpoch >= numSamples) {
       // Epoch is finished
       val epochEnd = System.nanoTime()
-      epochStart = System.nanoTime()
+      context.setEpochStart(System.nanoTime())
       logger.info(s"${_header} Epoch finished. Wall clock time is ${wallClockTime / 1e6} ms")
 
       driverState("epoch") = driverState[Int]("epoch") + 1
-      recordsProcessedThisEpoch = 0
+      context.resetRecordsProcessedThisEpoch()
     }
 
     optimMethods.map { case (moduleName, optimMethod) =>
-      optimMethod.state.update("recordsProcessedThisEpoch", recordsProcessedThisEpoch)
+      optimMethod.state.update("recordsProcessedThisEpoch", context.recordsProcessedThisEpoch)
       optimMethod.state.update("epoch", driverState[Int]("epoch"))
       optimMethod.state.update("neval", driverState[Int]("neval"))
       optimMethod.state.update("Loss", driverState[Float]("Loss"))
@@ -768,8 +795,8 @@ object DistriOptimizer extends AbstractOptimizer {
       }
     }
 
-    if (recordsProcessedThisEpoch >= numSamples) {
-      (lastEpochTime + epochEnd - epochStart, wallClockTime)
+    if (context.recordsProcessedThisEpoch >= numSamples) {
+      (lastEpochTime + context.epochEnd - context.epochStart, wallClockTime)
     } else {
       (wallClockTime, lastEpochTime)
     }
