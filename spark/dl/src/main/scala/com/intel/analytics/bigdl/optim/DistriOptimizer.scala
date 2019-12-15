@@ -34,7 +34,7 @@ import java.util.Calendar
 
 import org.apache.commons.lang.exception.ExceptionUtils
 import org.apache.log4j.Logger
-import org.apache.spark.{SparkContext, TaskContext}
+import org.apache.spark.{Accumulator, SparkContext, TaskContext}
 import org.apache.spark.rdd.RDD
 
 import scala.collection.mutable
@@ -96,13 +96,15 @@ object DistriOptimizer extends AbstractOptimizer {
 
   class Context[T: ClassTag](
     val parameter: AllReduceParameter[T],
-    val subModelNumber: Int) extends Serializable {
+    val subModelNumber: Int, val numSamples: Int) extends Serializable {
 
     private var _recordsNumber: Long = 0
     private var _epochStart: Long = 0
     private var _iteration: Long = 0
     private var _recordsProcessedThisEpoch: Int = 0
     private var _epochEnd: Long = 0
+    private var _wallClockTime: Long = 0
+    private var _lastEpochTime: Long = 0
 
     def addRecords(number: Long): Long = _recordsNumber + number
 
@@ -127,6 +129,16 @@ object DistriOptimizer extends AbstractOptimizer {
     def recordsProcessedThisEpoch: Int = _recordsProcessedThisEpoch
 
     def resetRecordsProcessedThisEpoch(): Unit = _recordsProcessedThisEpoch = 0
+
+    def addWallClockTime(elapsedTime: Long): Unit = _wallClockTime + elapsedTime
+
+    def resetWallClockTime(): Unit = _wallClockTime = 0
+
+    def wallClockTime: Long = _wallClockTime
+
+    def setLastEpochTime(time: Long): Unit = _lastEpochTime = time
+
+    def lastEpochTime: Long = _lastEpochTime
   }
 
   /**
@@ -195,8 +207,6 @@ object DistriOptimizer extends AbstractOptimizer {
       case MklDnn => 1
     }
 
-    val context = new Context(parameters, _subModelNumber)
-
     val driverState = T(
       "epoch" -> optimMethods.values.head.state("epoch"),
       "neval" -> optimMethods.values.head.state("neval"),
@@ -208,6 +218,8 @@ object DistriOptimizer extends AbstractOptimizer {
     logger.info("Count dataset")
     val countBefore = System.nanoTime()
     val numSamples = dataset.data(train = false).map(_.size()).reduce(_ + _)
+    val context = new Context(parameters, _subModelNumber, numSamples)
+
     val countAfter = System.nanoTime()
     logger.info(s"Count dataset complete. Time elapsed: ${(countAfter - countBefore) / 1e9}s")
     if (numSamples != dataset.size()) {
@@ -345,37 +357,10 @@ object DistriOptimizer extends AbstractOptimizer {
         Iterator.single(finishedThreads)
       }.reduce(_ + _)
 
-    // enough records were processed for this batch, so update the model
-    val value = lossSum.value / numFinishedModelUpdates
-
-    driverState("numFinishedModel") = numFinishedModelUpdates
-    // isGradientUpdated is flag to mark whether gradient is updated. May changed in the future.
-    driverState("isGradientUpdated") = false
-    // parameterProcesser like L2NormClippingProcessor may aggregate gradient,
-    // and change the value of isGradientUpdated in driverState.
-    parameterProcessers.foreach(_.collectGlobalData(models, parameters, metrics, driverState))
-
-    val isGradientUpdated = driverState[Boolean]("isGradientUpdated")
-
-    models.mapPartitions { modelIter =>
-      executorParameterProcess(parameters, modelIter.next(), isGradientUpdated, driverMetrics,
-        numFinishedModelUpdates, parameterProcessers, driverState, validationMethods,
-        parameterSplits, value)
-      Iterator.empty
-    }.count()
-
-    context.addRecordsProcessedThisEpoch(recordsNum.value)
-    val end = System.nanoTime()
-    wallClockTime += end - start
-    driverState("isGradientUpdated") = true
-    driverState("Loss") = lossSum.value.toFloat / numFinishedModelUpdates
-
-    val results = driverOptimMethodsUpdates(optimMethods, driverState, recordsNum.value,
-      end - start,
-      wallClockTime, lastEpochTime, numSamples, metrics, validationMethods, context)
-
-    wallClockTime = results._1
-    lastEpochTime = results._2
+    postSynchronize(lossSum, numFinishedModelUpdates, driverState, parameterProcessers, metrics,
+      models, parameters,
+      driverMetrics, validationMethods,
+      parameterSplits, recordsNum, optimMethods, start, context)
 
     trainSummary.foreach { summary =>
       saveSummary(
@@ -800,6 +785,50 @@ object DistriOptimizer extends AbstractOptimizer {
     } else {
       (wallClockTime, lastEpochTime)
     }
+  }
+
+  private def postSynchronize[T: ClassTag](lossSum: Accumulator[Double],
+    numFinishedModelUpdates: Int,
+    driverState: Table,
+    parameterProcessers: Array[ParameterProcessor],
+    metrics: Metrics, models: RDD[Cache[T]], parameters: AllReduceParameter[T],
+    driverMetrics: Metrics, validationMethods: Option[Array[ValidationMethod[T]]],
+    parameterSplits: Map[String, (Int, Int)], recordsNum: Accumulator[Int],
+    optimMethods: Map[String, OptimMethod[T]], start: Long,
+    context: Context[T])(implicit ev: TensorNumeric[T]): Unit = {
+
+    // enough records were processed for this batch, so update the model
+    val value = lossSum.value / numFinishedModelUpdates
+
+    driverState("numFinishedModel") = numFinishedModelUpdates
+    // isGradientUpdated is flag to mark whether gradient is updated. May changed in the future.
+    driverState("isGradientUpdated") = false
+    // parameterProcesser like L2NormClippingProcessor may aggregate gradient,
+    // and change the value of isGradientUpdated in driverState.
+    parameterProcessers.foreach(_.collectGlobalData(models, parameters, metrics, driverState))
+
+    val isGradientUpdated = driverState[Boolean]("isGradientUpdated")
+
+    models.mapPartitions { modelIter =>
+      executorParameterProcess(parameters, modelIter.next(), isGradientUpdated, driverMetrics,
+        numFinishedModelUpdates, parameterProcessers, driverState, validationMethods,
+        parameterSplits, value)
+      Iterator.empty
+    }.count()
+
+    context.addRecordsProcessedThisEpoch(recordsNum.value)
+    val end = System.nanoTime()
+    context.addWallClockTime(end - start)
+    driverState("isGradientUpdated") = true
+    driverState("Loss") = lossSum.value.toFloat / numFinishedModelUpdates
+
+    val results = driverOptimMethodsUpdates(optimMethods, driverState, recordsNum.value,
+      end - start,
+      context.wallClockTime, context.lastEpochTime, context.numSamples, metrics, validationMethods,
+      context)
+
+    context.addWallClockTime(results._1 - context.wallClockTime)
+    context.setLastEpochTime(results._2)
   }
 }
 
